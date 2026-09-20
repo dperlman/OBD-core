@@ -1,0 +1,203 @@
+"""
+binom_core.py -- the shared mathematics for the ordered-binomial cusp project.
+
+Every other script imports from here; nothing below is duplicated elsewhere.  Definitions:
+
+    f_p(k) = C(n,k) p^k (1-p)^(n-k),  k = 0..n
+    p*     = tie point of masses i<j (0<i<j<n, i+j>n so p*>1/2): f(i)=f(j);
+             rho = p*/(1-p*) = (C(n,i)/C(n,j))^(1/(j-i))
+    w_k    = rank of f(k) increasing, 0 = smallest.  Left of p*: w_j = w_i - 1.
+    E(n,p) = sum_k w_k f_p(k)
+    S_-    = sum_k w_k f(k)(k - n p*)       left slope numerator; E'_- = S_-/(p* q*)
+    S_+    = S_- + (j-i) f(i)               right slope numerator
+    cusp  <=>  S_- < 0 < S_+
+    F3     = (n+i-j)(i+j-2np*) + (j-np*)    right-hand slope of the pair's own contribution T+V,
+                                            in units of f(i)/(p* q*).  NOT the slope of T alone.
+
+Screening rule (tie_kernel): a tie point is decided in double precision when
+S_- < -MARGIN and S_+ > MARGIN (MIN), or S_- > MARGIN or S_+ < -MARGIN (NOT).  Anything else, or
+any tie point where two adjacent masses in the ranking (both >= TINY) are within relative GAP,
+is tagged CHECK and must go to certify().  Masses below TINY are treated as zero: without that the
+CHECK count explodes with n (182,542 at n=2000 instead of ~75).
+
+normalise=True divides the masses by their own sum before E and S_- are accumulated.  As computed
+from exp(lnC + k ln p + (n-k) ln q) they carry a shared relative error ~6e-13 (they sum to
+0.999999999999363 at n=2000), which leaves only ~3.6 digits on E - E(1/2); normalised, ~6.3.
+It is OFF for the certified generator so that its output stays bit-for-bit what it always was,
+and ON for the Parquet export.  It cannot change a certified verdict: it scales S_- and S_+ by a
+common 1+6e-13, twelve orders below MARGIN.
+"""
+import numpy as np
+from math import comb, lgamma
+from numba import njit
+
+MARGIN, GAP, TINY = 1e-6, 1e-8, 1e-290
+TAG_NOT, TAG_MIN, TAG_CHECK = 0, 1, 2
+
+def lnC_arr(n):
+    """log C(n,k) for k=0..n."""
+    return np.array([lgamma(n+1)-lgamma(k+1)-lgamma(n-k+1) for k in range(n+1)])
+
+def n_ties(n):
+    """number of tie points with 0<i<j<n and i+j>n."""
+    return sum(max(0, (n-1) - max(i+1, n-i+1) + 1) for i in range(1, n))
+
+def E_half(n, normalise=True):
+    """E(n,1/2).  Same normalisation convention as tie_kernel."""
+    import math
+    f = np.exp(lnC_arr(n) - n*math.log(2.0))
+    if normalise: f = f/math.fsum(f.tolist())
+    return math.fsum((np.arange(n+1)*np.sort(f)).tolist())
+
+@njit(cache=True)
+def tie_kernel(n, lnC, normalise, collect_all,
+               out_i, out_j, out_p, out_lnf, out_E, out_Sm, out_F3, out_tag):
+    """Screen every tie point of n.  Returns the number of rows written.
+
+    collect_all=False writes only MIN/CHECK rows (the certified generator's path);
+    True writes every tie point (the Parquet export's path).  Returning a count larger than the
+    array length means the buffers were too small -- retry with bigger ones.
+    """
+    cap = out_i.shape[0]
+    f = np.empty(n+1); w = np.empty(n+1, np.int64); cnt = 0
+    for i in range(1, n):
+        for j in range(max(i+1, n-i+1), n):          # i<j<n and i+j>n
+            m = j - i
+            lnrho = (lnC[i] - lnC[j]) / m
+            p = 1.0/(1.0 + np.exp(-lnrho)); q = 1.0 - p; rho = p/q
+            md = int(np.floor((n+1)*p))              # mode of Bin(n,p)
+            if md > n: md = n
+            f[md] = np.exp(lnC[md] + md*np.log(p) + (n-md)*np.log(q))
+            for k in range(md, 0, -1):               # leftwards: f_{k-1} = f_k * k/((n-k+1) rho)
+                f[k-1] = f[k] * k / ((n-k+1.0)*rho)
+            for k in range(md, n):                   # rightwards
+                f[k+1] = f[k] * rho*(n-k) / (k+1.0)
+            for k in range(n+1):                     # masses below TINY are numerically zero
+                if f[k] < TINY: f[k] = 0.0
+            f[j] = f[i]                              # exact tie
+            lns = 0.0
+            if normalise:
+                s = 0.0; comp = 0.0                  # Neumaier sum, then rescale
+                for k in range(n+1):
+                    t = s + f[k]
+                    if abs(s) >= abs(f[k]): comp += (s - t) + f[k]
+                    else:                   comp += (f[k] - t) + s
+                    s = t
+                s = s + comp
+                if s > 0.0:
+                    inv = 1.0/s
+                    for k in range(n+1): f[k] *= inv
+                    lns = np.log(s)
+            ln_fi = lnC[i] + i*np.log(p) + (n-i)*np.log(q) - lns
+            lnkap = np.log(m) + ln_fi                # kink (j-i) f(i), exact in log space
+            kap = np.exp(lnkap) if lnkap > -700.0 else 0.0
+            sp_ = md                                 # split: 0..sp_ increasing, sp_+1..n decreasing
+            if sp_ >= j: sp_ = j - 1
+            if sp_ < i: sp_ = i
+            a = 0; b = n; r = 0                      # two-pointer merge; ties: j before i
+            neartie = False; prev = -1.0
+            while a <= sp_ or b > sp_:
+                if a > sp_: take_left = False
+                elif b <= sp_: take_left = True
+                elif f[a] < f[b]: take_left = True
+                elif f[a] > f[b]: take_left = False
+                else: take_left = not (a == i and b == j)
+                if take_left: k = a; a += 1
+                else:         k = b; b -= 1
+                w[k] = r
+                if r > 0 and f[k] > 0.0 and not ((k == i and prev == f[j]) or (k == j and prev == f[i])):
+                    if (f[k] - prev)/f[k] < GAP and not (k == i or k == j): neartie = True
+                    if (k == i or k == j) and (f[k]-prev)/f[k] < GAP and prev != f[k]: neartie = True
+                prev = f[k]; r += 1
+            Sm = 0.0; E = 0.0; ce = 0.0
+            for k in range(n+1):
+                Sm += w[k]*f[k]*(k - n*p)            # expression order preserved: byte-identical
+                t = w[k]*f[k]
+                u = E + t                            # Neumaier for E
+                if abs(E) >= abs(t): ce += (E - u) + t
+                else:                ce += (t - u) + E
+                E = u
+            E = E + ce
+            Sp = Sm + kap
+            ismin = (Sm < -MARGIN) and (Sp > MARGIN)
+            isnot = (Sm > MARGIN) or (Sp < -MARGIN)
+            if neartie or not (ismin or isnot): tag = TAG_CHECK
+            elif ismin:                          tag = TAG_MIN
+            else:                                tag = TAG_NOT
+            if collect_all or tag != TAG_NOT:
+                if cnt < cap:
+                    out_i[cnt] = i; out_j[cnt] = j; out_p[cnt] = p; out_lnf[cnt] = ln_fi
+                    out_E[cnt] = E; out_Sm[cnt] = Sm
+                    out_F3[cnt] = (n+i-j)*(i+j-2*n*p) + (j-n*p)
+                    out_tag[cnt] = tag
+                cnt += 1
+    return cnt
+
+def screen(n, normalise=False, collect_all=False, lnC=None):
+    """tie_kernel with buffer management.  Returns a dict of numpy arrays."""
+    lnC = lnC_arr(n) if lnC is None else lnC
+    cap = n_ties(n) if collect_all else max(64, 4*n)
+    while True:
+        a = dict(i=np.empty(cap, np.int64), j=np.empty(cap, np.int64), pstar=np.empty(cap),
+                 ln_fi=np.empty(cap), E=np.empty(cap), S_minus=np.empty(cap),
+                 F3=np.empty(cap), tag=np.empty(cap, np.int64))
+        c = tie_kernel(n, lnC, normalise, collect_all,
+                       a['i'], a['j'], a['pstar'], a['ln_fi'], a['E'], a['S_minus'], a['F3'], a['tag'])
+        if c <= cap: break
+        cap = 2*c
+    return {k: v[:c] for k, v in a.items()}
+
+def certify(n, i, j, dps):
+    """Interval-arithmetic verdict for one tie point: 'MIN', 'NOT', or None if undecided."""
+    from mpmath import iv
+    iv.dps = dps; m = j-i
+    rho = (iv.mpf(comb(n,i))/iv.mpf(comb(n,j)))**(iv.mpf(1)/m)
+    p = rho/(1+rho); q = 1-p
+    f = [iv.mpf(comb(n,k))*p**k*q**(n-k) for k in range(n+1)]
+    order = sorted(range(n+1), key=lambda k: (f[i].mid if k in (i,j) else f[k].mid, 0 if k==j else 1))
+    for a, b in zip(order, order[1:]):
+        if {a,b} == {i,j}: continue
+        if not (f[a].b < f[b].a): return None
+    w = [0]*(n+1)
+    for r, k in enumerate(order): w[k] = r
+    Sm = sum(w[k]*f[k]*(k-n*p) for k in range(n+1)); Sp = Sm + m*f[i]
+    if Sm.b < 0 and Sp.a > 0: return 'MIN'
+    if Sm.a >= 0 or Sp.b <= 0: return 'NOT'
+    return None
+
+def certify_escalating(n, i, j, dps_seq=(50, 100, 200)):
+    """certify() at increasing precision.  Returns (verdict or None, 'iv50'/... or 'double')."""
+    for dps in dps_seq:
+        v = certify(n, i, j, dps)
+        if v: return v, f'iv{dps}'
+    return None, 'double'
+
+def evaluate(n, i, j):
+    """Double-precision descriptive values at a tie point (unnormalised; used for the CSV)."""
+    lnC = lnC_arr(n); k = np.arange(n+1); m = j-i
+    lnrho = (lnC[i]-lnC[j])/m; p = 1/(1+np.exp(-lnrho)); q = 1-p
+    with np.errstate(under='ignore'):
+        f = np.exp(lnC + k*np.log(p) + (n-k)*np.log(q))
+    f[j] = f[i]
+    key2 = np.zeros(n+1); key2[i] = 1
+    order = np.lexsort((key2, f)); w = np.empty(n+1, int); w[order] = k
+    Sm = float(np.sum(w*f*(k-n*p))); Sp = Sm + m*f[i]
+    E = float(np.sum(w*f)); F3 = (n+i-j)*(i+j-2*n*p) + (j-n*p)
+    return p, E, F3, Sm, Sp, Sm/(p*q), Sp/(p*q)
+
+def recheck(n, i, j, dps=50):
+    """High-precision values for one tie point, printed."""
+    from mpmath import mp, mpf, nstr
+    mp.dps = dps; m = j-i
+    rho = (mpf(comb(n,i))/comb(n,j))**(mpf(1)/m); p = rho/(1+rho); q = 1-p
+    f = [comb(n,k)*p**k*q**(n-k) for k in range(n+1)]
+    order = sorted(range(n+1), key=lambda k: (f[i] if k in (i,j) else f[k], 0 if k==j else 1))
+    w = [0]*(n+1)
+    for r, k in enumerate(order): w[k] = r
+    Sm = sum(w[k]*f[k]*(k-n*p) for k in range(n+1)); Sp = Sm + m*f[i]
+    E = sum(w[k]*f[k] for k in range(n+1)); F3 = (n+i-j)*(i+j-2*n*p) + (j-n*p)
+    print(f"n={n} i={i} j={j}  ({dps} digits)")
+    for name, v in (("p*",p),("E",E),("F3",F3),("S_-",Sm),("S_+",Sp),
+                    ("slope_left",Sm/(p*q)),("slope_right",Sp/(p*q))):
+        print(f"  {name:12s} {nstr(v, dps-10)}")
+    print("  cusp:", Sm < 0 < Sp)
