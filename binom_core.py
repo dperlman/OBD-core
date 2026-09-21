@@ -28,10 +28,11 @@ below MARGIN.  It DOES change the descriptive columns in the 16th significant di
 written before 2026-09-20 differ from freshly generated ones -- regenerate rather than mix them.
 """
 import numpy as np
-from math import comb, lgamma
+from math import comb, lgamma, log as _log
 from numba import njit
 
 MARGIN, GAP, TINY = 1e-6, 1e-8, 1e-290
+LN_TINY = _log(TINY)                 # window test in _one_tie; do not hardcode this
 TAG_NOT, TAG_MIN, TAG_CHECK = 0, 1, 2
 
 def lnC_arr(n):
@@ -53,7 +54,9 @@ def E_half(n):
 def _one_tie(n, lnC, i, j, f, w):
     """All quantities for a single tie point.  The ONLY place the masses and ranks are computed.
 
-    Returns (p, ln_fi, E, S_minus, kappa, F3, tag).  Masses are always normalised by their own sum:
+    Returns (p, ln_fi, E, S_minus, kappa, F3, tag).  Only the masses at or above TINY are touched
+    (see the window comment in the body); the rest are exactly zero and change no result.
+    Masses are always normalised by their own sum:
     unnormalised they carry a shared relative error ~6e-13 from exp/lgamma (they sum to
     0.999999999999363 at n=2000), which leaves only ~3.6 digits on E - E(1/2) instead of ~6.3.
     f and w are scratch buffers of length n+1, passed in so a loop can reuse them.
@@ -61,18 +64,39 @@ def _one_tie(n, lnC, i, j, f, w):
     m = j - i
     lnrho = (lnC[i] - lnC[j]) / m
     p = 1.0/(1.0 + np.exp(-lnrho)); q = 1.0 - p; rho = p/q
+    lnp = np.log(p); lnq = np.log(q)
     md = int(np.floor((n+1)*p))                  # mode of Bin(n,p)
     if md > n: md = n
-    f[md] = np.exp(lnC[md] + md*np.log(p) + (n-md)*np.log(q))
-    for k in range(md, 0, -1):                   # leftwards: f_{k-1} = f_k * k/((n-k+1) rho)
-        f[k-1] = f[k] * k / ((n-k+1.0)*rho)
-    for k in range(md, n):                       # rightwards
-        f[k+1] = f[k] * rho*(n-k) / (k+1.0)
-    for k in range(n+1):                         # masses below TINY are numerically zero
+    # Only the masses at or above TINY can affect anything: the rest are zeroed below, contribute
+    # exactly 0.0 to every sum, and sit as an equal block at the bottom of the ranking.  The masses
+    # fall away monotonically from the mode, so once the recurrence drops below TINY it stays below
+    # and we can stop -- giving a window [lo,hi] of width O(sqrt(n)) instead of n+1.
+    # The one trap: f[j] = f[i] below is applied AFTER zeroing, so it can rescue a j that fell just
+    # under TINY.  f(i) is known in closed form, so when the pair is above TINY we refuse to stop
+    # before reaching i on the left and j on the right, and the rescue still happens.
+    pair_in = (lnC[i] + i*lnp + (n-i)*lnq) >= LN_TINY
+    lo_req = i if pair_in else md
+    hi_req = j if pair_in else md
+    f[md] = np.exp(lnC[md] + md*lnp + (n-md)*lnq)
+    k = md
+    while k > 0:                                 # leftwards: f_{k-1} = f_k * k/((n-k+1) rho)
+        v = f[k] * k / ((n-k+1.0)*rho)
+        f[k-1] = v; k -= 1
+        if v < TINY and k <= lo_req: break
+    lo = k
+    k = md
+    while k < n:                                 # rightwards
+        v = f[k] * rho*(n-k) / (k+1.0)
+        f[k+1] = v; k += 1
+        if v < TINY and k >= hi_req: break
+    hi = k
+    for k in range(lo, hi+1):                    # masses below TINY are numerically zero
         if f[k] < TINY: f[k] = 0.0
     f[j] = f[i]                                  # exact tie
+    nz = lo + (n - hi)                           # masses outside the window: all exactly zero,
+                                                 # so they take ranks 0..nz-1 as an equal block
     s = 0.0; comp = 0.0                          # Neumaier sum, then rescale
-    for k in range(n+1):
+    for k in range(lo, hi+1):
         t = s + f[k]
         if abs(s) >= abs(f[k]): comp += (s - t) + f[k]
         else:                   comp += (f[k] - t) + s
@@ -81,15 +105,17 @@ def _one_tie(n, lnC, i, j, f, w):
     lns = 0.0
     if s > 0.0:
         inv = 1.0/s
-        for k in range(n+1): f[k] *= inv
+        for k in range(lo, hi+1): f[k] *= inv
         lns = np.log(s)
-    ln_fi = lnC[i] + i*np.log(p) + (n-i)*np.log(q) - lns
+    ln_fi = lnC[i] + i*lnp + (n-i)*lnq - lns
     kappa = np.exp(np.log(m) + ln_fi)            # kink (j-i)f(i), via logs; underflows to 0 naturally
-    sp_ = md                                     # split: 0..sp_ increasing, sp_+1..n decreasing
+    sp_ = md                                     # split: lo..sp_ increasing, sp_+1..hi decreasing
     if sp_ >= j: sp_ = j - 1
     if sp_ < i: sp_ = i
-    a = 0; b = n; r = 0                          # two-pointer merge; ties: j before i
-    neartie = False; prev = -1.0
+    if sp_ < lo: sp_ = lo
+    if sp_ > hi: sp_ = hi
+    a = lo; b = hi; r = nz                       # two-pointer merge; ties: j before i
+    neartie = False; prev = 0.0 if nz > 0 else -1.0
     while a <= sp_ or b > sp_:
         if a > sp_: take_left = False
         elif b <= sp_: take_left = True
@@ -104,7 +130,7 @@ def _one_tie(n, lnC, i, j, f, w):
             if (k == i or k == j) and (f[k]-prev)/f[k] < GAP and prev != f[k]: neartie = True
         prev = f[k]; r += 1
     Sm = 0.0; E = 0.0; ce = 0.0
-    for k in range(n+1):
+    for k in range(lo, hi+1):
         Sm += w[k]*f[k]*(k - n*p)
         t = w[k]*f[k]
         u = E + t                                # Neumaier for E
