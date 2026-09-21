@@ -174,6 +174,34 @@ def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None):
         cap = 2*c
     return {k: v[:c] for k, v in a.items()}
 
+def axis_point(n):
+    """The tie point at p=1/2 itself, where ALL mirror pairs (i,n-i) tie simultaneously.
+
+    Returns (S_minus, S_plus, E, kappa, n_tied_pairs).  This is not an ordinary tie point: the
+    i+j>n filter excludes p=1/2 precisely because it IS the symmetry axis, and the single-pair
+    bookkeeping S_+ = S_- + (j-i)f(i) does not apply -- every mirror pair contributes to the kink
+    at once.  What does apply is the symmetry E(p) = E(1-p), which gives E'(1/2-) = -E'(1/2+)
+    exactly, hence S_- = -S_+ and u = S_-/kappa = -1/2 exactly: the zero sits dead centre in the
+    slope jump, making p=1/2 the most robust cusp there is.
+
+    The ranking must be built, not sorted for: f(k) and f(n-k) are equal in exact arithmetic but
+    differ in the last ulp via lgamma, so a stable sort orders them by numerical noise and gets the
+    sign of S_+ wrong (it did, for 26 values of n, until the masses were symmetrised first).  Just
+    to the right of 1/2 the larger index carries the larger mass, so ties break to smaller index
+    first.
+    """
+    import math
+    k = np.arange(n+1)
+    f = np.exp(lnC_arr(n) - n*math.log(2.0))
+    f = 0.5*(f + f[::-1])                       # enforce f(k) = f(n-k) exactly
+    f = f/math.fsum(f.tolist())
+    o = np.lexsort((k, f))                      # by mass, ties to the smaller index first
+    w = np.empty(n+1, np.int64); w[o] = np.arange(n+1)
+    Sp = float(math.fsum((w*f*(k - n*0.5)).tolist()))
+    E = float(math.fsum((w*f).tolist()))
+    n_pairs = (n+1)//2 if n % 2 else n//2       # pairs (i,n-i) with 0<i<n-i<n, plus i=0 with j=n
+    return -Sp, Sp, E, 2*Sp, n_pairs
+
 def certify(n, i, j, dps, order=None):
     """Interval-arithmetic verdict for one tie point: 'MIN', 'NOT', or None if undecided.
 
