@@ -154,7 +154,7 @@ def _one_tie(n, lnC, i, j, f, w):
 @njit(cache=True)
 def tie_kernel(n, lnC, collect_all, i_lo, i_hi,
                out_i, out_j, out_p, out_lnf, out_E, out_Sm, out_F3, out_tag):
-    """Screen every tie point of n (i<j<n, i+j>n).  Returns the number of rows written.
+    """Screen every tie point of n (i<j<=n, i+j>n).  Returns the number of rows written.
 
     collect_all=False writes only MIN/CHECK rows (the certified generator's path);
     True writes every tie point (the Parquet export's path).  A count larger than the array
