@@ -4,7 +4,11 @@ binom_core.py -- the shared mathematics for the ordered-binomial cusp project.
 Every other script imports from here; nothing below is duplicated elsewhere.  Definitions:
 
     f_p(k) = C(n,k) p^k (1-p)^(n-k),  k = 0..n
-    p*     = tie point of masses i<j (0<i<j<n, i+j>n so p*>1/2): f(i)=f(j);
+    p*     = tie point of masses i<j (0<=i<j<=n, i+j>n so p*>1/2): f(i)=f(j);
+             The range was widened from 0<i<j<n on 2026-09-21: the pairs (i,n) are genuine order
+             changes with p*>1/2 -- their mirrors (0,j) sit below 1/2, so the symmetry restriction
+             does not remove them -- and the last of them, (n-1,n), is at p*=n/(n+1), above which
+             every mass is in natural order and E = n p exactly.  They hold no cusps for n>=4.
              rho = p*/(1-p*) = (C(n,i)/C(n,j))^(1/(j-i))
     w_k    = rank of f(k) increasing, 0 = smallest.  Left of p*: w_j = w_i - 1.
     E(n,p) = sum_k w_k f_p(k)
@@ -40,8 +44,8 @@ def lnC_arr(n):
     return np.array([lgamma(n+1)-lgamma(k+1)-lgamma(n-k+1) for k in range(n+1)])
 
 def n_ties(n):
-    """number of tie points with 0<i<j<n and i+j>n."""
-    return sum(max(0, (n-1) - max(i+1, n-i+1) + 1) for i in range(1, n))
+    """number of tie points with 0<=i<j<=n and i+j>n.  (i=0 contributes none: i+j>n needs j>n.)"""
+    return sum(max(0, n - max(i+1, n-i+1) + 1) for i in range(1, n))
 
 def E_half(n):
     """E(n,1/2), masses normalised by their own sum -- same convention as _one_tie."""
@@ -161,7 +165,7 @@ def tie_kernel(n, lnC, collect_all, i_lo, i_hi,
     cap = out_i.shape[0]
     f = np.empty(n+1); w = np.empty(n+1, np.int64); cnt = 0
     for i in range(i_lo, i_hi):
-        for j in range(max(i+1, n-i+1), n):
+        for j in range(max(i+1, n-i+1), n+1):        # j <= n: the pairs (i,n) are real tie points
             p, ln_fi, E, Sm, kappa, F3, tag = _one_tie(n, lnC, i, j, f, w)
             if collect_all or tag != TAG_NOT:
                 if cnt < cap:
@@ -171,11 +175,11 @@ def tie_kernel(n, lnC, collect_all, i_lo, i_hi,
     return cnt
 
 def ties_in_range(n, i_lo, i_hi):
-    return sum(max(0, (n-1) - max(i+1, n-i+1) + 1) for i in range(i_lo, i_hi))
+    return sum(max(0, n - max(i+1, n-i+1) + 1) for i in range(i_lo, i_hi))
 
 def work_chunks(n, parts):
     """Split i in [1,n) into `parts` ranges of roughly equal work (work per i ~ number of valid j)."""
-    r = np.array([max(0, (n-1) - max(i+1, n-i+1) + 1) for i in range(1, n)])
+    r = np.array([max(0, n - max(i+1, n-i+1) + 1) for i in range(1, n)])
     c = np.cumsum(r); total = c[-1]
     out = []; lo = 1
     for t in range(1, parts+1):
