@@ -29,7 +29,8 @@ The ORIGINAL one (sharp=False) is a proxy: flag whenever two adjacent masses in 
 almost always it does not -- swapping adjacent ranks of masses a,b moves S_- by exactly
 f_a(a-np*) - f_b(b-np*) ~ f*(a-b), so the damage scales with the SIZE of the masses, and a near-tie
 between two masses at 1e-287 moves S_- by ~1e-284 against an S_- of order 1e-2.
-The SHARPENED one (sharp=True) bounds that movement instead of guessing at it: masses whose order
+The SHARPENED one (sharp=True, the DEFAULT since 2026-09-21) bounds that movement instead of
+guessing at it: masses whose order
 double precision cannot resolve are grouped into maximal clusters, within a cluster of size c any
 rank moves by at most c-1, and the resulting bound (c-1)*sum_{k in C} f_k|k - n p*| is added to
 MARGIN on both sides.  The resolution threshold comes from _err_bounds, which is derived from the
@@ -37,7 +38,8 @@ algorithm's own operation count -- nothing in it is fitted.  Validated by valida
 over all 195,243 tie points that the GAP rule escalated for n<=3000 it decides 195,062 in double
 with ZERO disagreements against the mpmath verdict, and over every tie point of
 n = 135,400,800,1000,1100,1200,1500,2000,2500,3000,4000,5000 it flags nothing the GAP rule decided.
-At n=5000 it takes the interval-arithmetic workload from 1411 tie points to 1.
+At n=5000 it takes the interval-arithmetic workload from 1411 tie points to 1.  GAP is now used
+by nothing but that comparison path.
 
 The masses are ALWAYS normalised by their own sum before E and S_- are accumulated.  As computed
 from exp(lnC + k ln p + (n-k) ln q) they carry a shared relative error ~6e-13 (they sum to
@@ -238,9 +240,9 @@ def tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp,
     length means the buffers were too small -- retry with bigger ones.
     i_lo/i_hi restrict the outer loop, so one n can be split across processes; each tie point is
     computed identically regardless of how the range is cut.
-    sharp selects which trigger drives out_tag and the collect_all=False filter: False is the
-    historical near-tie proxy (relative GAP between adjacent masses), True the re-ranking cluster
-    bound.  BOTH tags are always written -- out_tag is the selected one, out_tag2 the other -- along
+    sharp selects which trigger drives out_tag and the collect_all=False filter: True (the
+    DEFAULT since 2026-09-21) is the re-ranking cluster bound, False the historical near-tie proxy
+    (relative GAP between adjacent masses), kept only so validate_trigger.py can compare them.  BOTH tags are always written -- out_tag is the selected one, out_tag2 the other -- along
     with the bound itself in out_rbnd, so a single pass can compare the two rules.
     """
     cap = out_i.shape[0]
@@ -273,11 +275,13 @@ def work_chunks(n, parts):
     if lo < n: out.append((lo, n))
     return [(a, b) for a, b in out if ties_in_range(n, a, b) > 0]
 
-def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=False):
+def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=True):
     """tie_kernel with buffer management.  Returns a dict of numpy arrays.
 
-    sharp picks the CHECK trigger (see tie_kernel).  The returned dict always carries both
-    verdicts: 'tag' from the selected rule and 'tag_alt' from the other, plus 'rbnd'.
+    sharp picks the CHECK trigger (see tie_kernel); it DEFAULTS TO THE SHARPENED ONE.  The
+    returned dict always carries both verdicts: 'tag' from the selected rule and 'tag_alt' from the
+    other, plus 'rbnd'.  Anything comparing the two rules must pass sharp explicitly rather than
+    relying on which one 'tag' happens to hold.
     """
     lnC = lnC_arr(n) if lnC is None else lnC
     i_hi = n if i_hi is None else i_hi
