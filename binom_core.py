@@ -19,10 +19,25 @@ Every other script imports from here; nothing below is duplicated elsewhere.  De
                                             in units of f(i)/(p* q*).  NOT the slope of T alone.
 
 Screening rule (tie_kernel): a tie point is decided in double precision when
-S_- < -MARGIN and S_+ > MARGIN (MIN), or S_- > MARGIN or S_+ < -MARGIN (NOT).  Anything else, or
-any tie point where two adjacent masses in the ranking (both >= TINY) are within relative GAP,
-is tagged CHECK and must go to certify().  Masses below TINY are treated as zero: without that the
+S_- < -MARGIN and S_+ > MARGIN (MIN), or S_- > MARGIN or S_+ < -MARGIN (NOT).  Anything else is
+tagged CHECK and must go to certify().  Masses below TINY are treated as zero: without that the
 CHECK count explodes with n (182,542 at n=2000 instead of ~75).
+
+On top of the margin test the ranking itself may be uncertain, and there are two rules for that.
+The ORIGINAL one (sharp=False) is a proxy: flag whenever two adjacent masses in the ranking, both
+>= TINY, are within relative GAP = 1e-8.  It never asks whether a wrong ranking would MATTER, and
+almost always it does not -- swapping adjacent ranks of masses a,b moves S_- by exactly
+f_a(a-np*) - f_b(b-np*) ~ f*(a-b), so the damage scales with the SIZE of the masses, and a near-tie
+between two masses at 1e-287 moves S_- by ~1e-284 against an S_- of order 1e-2.
+The SHARPENED one (sharp=True) bounds that movement instead of guessing at it: masses whose order
+double precision cannot resolve are grouped into maximal clusters, within a cluster of size c any
+rank moves by at most c-1, and the resulting bound (c-1)*sum_{k in C} f_k|k - n p*| is added to
+MARGIN on both sides.  The resolution threshold comes from _err_bounds, which is derived from the
+algorithm's own operation count -- nothing in it is fitted.  Validated by validate_trigger.py:
+over all 195,243 tie points that the GAP rule escalated for n<=3000 it decides 195,062 in double
+with ZERO disagreements against the mpmath verdict, and over every tie point of
+n = 135,400,800,1000,1100,1200,1500,2000,2500,3000,4000,5000 it flags nothing the GAP rule decided.
+At n=5000 it takes the interval-arithmetic workload from 1411 tie points to 1.
 
 The masses are ALWAYS normalised by their own sum before E and S_- are accumulated.  As computed
 from exp(lnC + k ln p + (n-k) ln q) they carry a shared relative error ~6e-13 (they sum to
@@ -37,6 +52,7 @@ from numba import njit
 
 MARGIN, GAP, TINY = 1e-6, 1e-8, 1e-290
 LN_TINY = _log(TINY)                 # window test in _one_tie; do not hardcode this
+EPS = 2.0**-53                       # unit roundoff, for the sharpened trigger's error bounds
 TAG_NOT, TAG_MIN, TAG_CHECK = 0, 1, 2
 
 def lnC_arr(n):
@@ -53,6 +69,34 @@ def E_half(n):
     f = np.exp(lnC_arr(n) - n*math.log(2.0))
     f = f/math.fsum(f.tolist())
     return math.fsum((np.arange(n+1)*np.sort(f)).tolist())
+
+@njit(cache=True)
+def _err_bounds(n, lnC, i, j, md, q, lnp, lnq):
+    """Error bounds for the sharpened re-ranking trigger.  Returns (dp, df0, dstep).
+
+    Derived from the algorithm in _one_tie, term by term; eps = 2^-53 throughout.  Every constant
+    below counts floating-point operations, so nothing here is fitted.
+
+    dp -- relative error of the computed p*.  lnrho = (lnC[i]-lnC[j])/m subtracts two numbers of
+      size ~n ln2 whose difference is only O(m), so the cancellation costs a factor n/m: with
+      lgamma at <=2 ulp per term the absolute error of lnrho is <= 3 eps max(lnC[i],lnC[j])/m, and
+      p = 1/(1+exp(-lnrho)) has dp/dlnrho = p q, so the RELATIVE error of p is q times that.
+      (Measured: 5.8e-12 worst case at n=8000, m=1, against 8e-12 from this form.)
+    df0, dstep -- relative error of the computed mass f[k], as df0 + dstep*|k-md|.
+      f[md] = exp(lnC[md] + md lnp + (n-md) lnq): exp turns an ABSOLUTE argument error into a
+      relative result error, and the argument's three terms are each ~n-sized while their sum is
+      O(1), so their roundings do not cancel -- 4 eps L with L the sum of their magnitudes, plus
+      1 eps for exp itself.  Each recurrence step is 3 flops on positive quantities, so the
+      relative error accumulates additively at 3 eps per step away from the mode.
+      Normalisation by the mass sum is NOT included: it is a factor common to every mass, so it
+      cancels in every ratio the trigger tests and cannot change the sign of S_-.
+    """
+    m = j - i
+    Lc = lnC[i] if lnC[i] > lnC[j] else lnC[j]
+    dp = q * 3.0*EPS*Lc / m
+    L = abs(lnC[md]) + abs(md*lnp) + abs((n-md)*lnq)
+    df0 = 4.0*EPS*L + EPS
+    return dp, df0, 3.0*EPS
 
 @njit(cache=True)
 def _one_tie(n, lnC, i, j, f, w):
@@ -118,8 +162,18 @@ def _one_tie(n, lnC, i, j, f, w):
     if sp_ < i: sp_ = i
     if sp_ < lo: sp_ = lo
     if sp_ > hi: sp_ = hi
+    dp, df0, dstep = _err_bounds(n, lnC, i, j, md, q, lnp, lnq)
     a = lo; b = hi; r = nz                       # two-pointer merge; ties: j before i
     neartie = False; prev = 0.0 if nz > 0 else -1.0
+    # Sharpened trigger.  Masses whose order double precision cannot resolve are grouped into
+    # maximal clusters; within a cluster of size c any rank can move by at most c-1, so the total
+    # possible perturbation of S_- is bounded by (c-1)*sum_{k in C} f_k |k - n p*|, summed over
+    # clusters.  Adjacent masses are unresolvable when their relative gap is within the two masses'
+    # own error bounds plus the differential effect of dp: d(ln f_k - ln f_l)/dp = (k-l)/(pq), so an
+    # error p*dp in p* moves the ratio by dp*|k-l|/q.  The cluster {i,j} alone contributes NOTHING:
+    # f(i)=f(j) exactly and w_j = w_i - 1 is the left-limit ranking by definition, not a numerical
+    # guess.  A third mass joining them makes the cluster count in full, which is conservative.
+    rbnd = 0.0; csum = 0.0; csize = 0; conly_ij = True; previdx = -1
     while a <= sp_ or b > sp_:
         if a > sp_: take_left = False
         elif b <= sp_: take_left = True
@@ -132,7 +186,21 @@ def _one_tie(n, lnC, i, j, f, w):
         if r > 0 and f[k] > 0.0 and not ((k == i and prev == f[j]) or (k == j and prev == f[i])):
             if (f[k] - prev)/f[k] < GAP and not (k == i or k == j): neartie = True
             if (k == i or k == j) and (f[k]-prev)/f[k] < GAP and prev != f[k]: neartie = True
+        amb = False
+        if previdx >= 0 and f[k] > 0.0:
+            thr = (2.0*df0 + dstep*(abs(k-md) + abs(previdx-md))
+                   + dp*abs(k-previdx)/q)
+            if (f[k] - prev)/f[k] <= thr: amb = True
+        t_ka = f[k]*abs(k - n*p)
+        if amb:
+            csize += 1; csum += t_ka
+            if not (k == i or k == j): conly_ij = False
+        else:
+            if csize > 1 and not conly_ij: rbnd += (csize-1)*csum
+            csize = 1; csum = t_ka; conly_ij = (k == i or k == j)
+        previdx = k
         prev = f[k]; r += 1
+    if csize > 1 and not conly_ij: rbnd += (csize-1)*csum
     Sm = 0.0; E = 0.0; ce = 0.0
     for k in range(lo, hi+1):
         Sm += w[k]*f[k]*(k - n*p)
@@ -145,15 +213,24 @@ def _one_tie(n, lnC, i, j, f, w):
     Sp = Sm + kappa
     ismin = (Sm < -MARGIN) and (Sp > MARGIN)
     isnot = (Sm > MARGIN) or (Sp < -MARGIN)
-    if neartie or not (ismin or isnot): tag = TAG_CHECK
-    elif ismin:                          tag = TAG_MIN
-    else:                                tag = TAG_NOT
+    if neartie or not (ismin or isnot): tag_old = TAG_CHECK
+    elif ismin:                          tag_old = TAG_MIN
+    else:                                tag_old = TAG_NOT
+    # Sharpened tag: the same margin test, widened by the re-ranking bound.  rbnd perturbs S_- and
+    # S_+ equally (kappa is exact), so it enters both sides.  No new constant is introduced.
+    mg = MARGIN + rbnd
+    smin = (Sm < -mg) and (Sp > mg)
+    snot = (Sm > mg) or (Sp < -mg)
+    if not (smin or snot): tag_new = TAG_CHECK
+    elif smin:             tag_new = TAG_MIN
+    else:                  tag_new = TAG_NOT
     F3 = (n+i-j)*(i+j-2*n*p) + (j-n*p)
-    return p, ln_fi, E, Sm, kappa, F3, tag
+    return p, ln_fi, E, Sm, kappa, F3, tag_old, tag_new, rbnd
 
 @njit(cache=True)
-def tie_kernel(n, lnC, collect_all, i_lo, i_hi,
-               out_i, out_j, out_p, out_lnf, out_E, out_Sm, out_F3, out_tag):
+def tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp,
+               out_i, out_j, out_p, out_lnf, out_E, out_Sm, out_F3, out_tag,
+               out_tag2, out_rbnd):
     """Screen every tie point of n (i<j<=n, i+j>n).  Returns the number of rows written.
 
     collect_all=False writes only MIN/CHECK rows (the certified generator's path);
@@ -161,16 +238,23 @@ def tie_kernel(n, lnC, collect_all, i_lo, i_hi,
     length means the buffers were too small -- retry with bigger ones.
     i_lo/i_hi restrict the outer loop, so one n can be split across processes; each tie point is
     computed identically regardless of how the range is cut.
+    sharp selects which trigger drives out_tag and the collect_all=False filter: False is the
+    historical near-tie proxy (relative GAP between adjacent masses), True the re-ranking cluster
+    bound.  BOTH tags are always written -- out_tag is the selected one, out_tag2 the other -- along
+    with the bound itself in out_rbnd, so a single pass can compare the two rules.
     """
     cap = out_i.shape[0]
     f = np.empty(n+1); w = np.empty(n+1, np.int64); cnt = 0
     for i in range(i_lo, i_hi):
         for j in range(max(i+1, n-i+1), n+1):        # j <= n: the pairs (i,n) are real tie points
-            p, ln_fi, E, Sm, kappa, F3, tag = _one_tie(n, lnC, i, j, f, w)
+            p, ln_fi, E, Sm, kappa, F3, tag_old, tag_new, rbnd = _one_tie(n, lnC, i, j, f, w)
+            tag = tag_new if sharp else tag_old
             if collect_all or tag != TAG_NOT:
                 if cnt < cap:
                     out_i[cnt] = i; out_j[cnt] = j; out_p[cnt] = p; out_lnf[cnt] = ln_fi
                     out_E[cnt] = E; out_Sm[cnt] = Sm; out_F3[cnt] = F3; out_tag[cnt] = tag
+                    out_tag2[cnt] = tag_old if sharp else tag_new
+                    out_rbnd[cnt] = rbnd
                 cnt += 1
     return cnt
 
@@ -189,17 +273,23 @@ def work_chunks(n, parts):
     if lo < n: out.append((lo, n))
     return [(a, b) for a, b in out if ties_in_range(n, a, b) > 0]
 
-def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None):
-    """tie_kernel with buffer management.  Returns a dict of numpy arrays."""
+def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=False):
+    """tie_kernel with buffer management.  Returns a dict of numpy arrays.
+
+    sharp picks the CHECK trigger (see tie_kernel).  The returned dict always carries both
+    verdicts: 'tag' from the selected rule and 'tag_alt' from the other, plus 'rbnd'.
+    """
     lnC = lnC_arr(n) if lnC is None else lnC
     i_hi = n if i_hi is None else i_hi
     cap = ties_in_range(n, i_lo, i_hi) if collect_all else max(64, 4*n)
     while True:
         a = dict(i=np.empty(cap, np.int64), j=np.empty(cap, np.int64), pstar=np.empty(cap),
                  ln_fi=np.empty(cap), E=np.empty(cap), S_minus=np.empty(cap),
-                 F3=np.empty(cap), tag=np.empty(cap, np.int64))
-        c = tie_kernel(n, lnC, collect_all, i_lo, i_hi,
-                       a['i'], a['j'], a['pstar'], a['ln_fi'], a['E'], a['S_minus'], a['F3'], a['tag'])
+                 F3=np.empty(cap), tag=np.empty(cap, np.int64),
+                 tag_alt=np.empty(cap, np.int64), rbnd=np.empty(cap))
+        c = tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp,
+                       a['i'], a['j'], a['pstar'], a['ln_fi'], a['E'], a['S_minus'], a['F3'],
+                       a['tag'], a['tag_alt'], a['rbnd'])
         if c <= cap: break
         cap = 2*c
     return {k: v[:c] for k, v in a.items()}
@@ -292,7 +382,7 @@ def evaluate(n, i, j, lnC=None):
     """
     lnC = lnC_arr(n) if lnC is None else lnC
     f = np.empty(n+1); w = np.empty(n+1, np.int64)
-    p, ln_fi, E, Sm, kappa, F3, tag = _one_tie(n, lnC, i, j, f, w)
+    p, ln_fi, E, Sm, kappa, F3, tag_old, tag_new, rbnd = _one_tie(n, lnC, i, j, f, w)
     q = 1 - p; Sp = Sm + kappa
     return p, E, F3, Sm, Sp, Sm/(p*q), Sp/(p*q)
 
