@@ -72,6 +72,17 @@ def E_half(n):
     f = f/math.fsum(f.tolist())
     return math.fsum((np.arange(n+1)*np.sort(f)).tolist())
 
+def E_at(n, p):
+    """E(n,p) at an arbitrary p, masses normalised by their own sum -- same convention as E_half
+    and _one_tie.  Ranks come from a sort, which is exact away from tie points; AT a tie point E is
+    still right (E is continuous there), only the one-sided slopes need the kernel's bookkeeping.
+    Descriptive only, not certified."""
+    import math
+    k = np.arange(n+1)
+    f = np.exp(lnC_arr(n) + k*math.log(p) + (n-k)*math.log1p(-p))
+    f = f/math.fsum(f.tolist())
+    return math.fsum((np.arange(n+1)*np.sort(f)).tolist())
+
 @njit(cache=True)
 def _err_bounds(n, lnC, i, j, md, q, lnp, lnq):
     """Error bounds for the sharpened re-ranking trigger.  Returns (dp, df0, dstep).
