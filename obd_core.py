@@ -417,3 +417,83 @@ def recheck(n, i, j, dps=50):
                     ("slope_left",Sm/(p*q)),("slope_right",Sp/(p*q))):
         print(f"  {name:12s} {nstr(v, dps-10)}")
     print("  cusp:", Sm < 0 < Sp)
+
+# ---------------------------------------------------------------------------------------------
+# Every tie point of one n, certified: the bulk table that dump_ties.py and the OBD repo build on.
+
+def _screen_chunk(a):
+    n, lo, hi = a
+    return screen(n, collect_all=True, i_lo=lo, i_hi=hi)
+
+def _certify_one(a):
+    n, i, j = a
+    v, how = certify_escalating(n, i, j)
+    return (v == 'MIN'), (how if v else 'UNRESOLVED')
+
+def tie_table(n, both_halves=False, workers=1, pool=None):
+    """Every tie point of n, sorted by p*, with certified cusp verdicts and exact slopes.
+
+    Returns a dict of equal-length numpy arrays:
+        i, j, pstar, ln_fi, E, S_minus, F3, tag     as from screen(n, collect_all=True)
+        n_tied_pairs    1 for an ordinary tie point
+        is_cusp         bool, certified: CHECK-tagged rows go through certify_escalating
+        decided_by      'double', 'iv50'/'iv100'/'iv200', 'UNRESOLVED', or 'symmetry' (axis)
+        slope_left, slope_right    E'_- and E'_+ at p*
+        log10_D         log10 of the slope jump D = E'_+ - E'_- = (j-i) f(i) / (p* q*), from ln_fi
+                        and so exact far below double range.  NEVER take D as slope_right -
+                        slope_left: for most tie points D is many orders below the slopes and the
+                        difference is 0 or noise.  slope_right = slope_left + D carries the same
+                        loss, so it is right as a slope but useless for recovering D.
+
+    Row 0 of the p* > 1/2 half is the symmetry axis p = 1/2, where all mirror pairs (i, n-i) tie at
+    once.  It carries the sentinel (i, j) = (0, n), n_tied_pairs = the number of pairs, F3 = NaN,
+    decided_by = 'symmetry', and ln_fi = ln(kappa/n) so that (j-i) exp(ln_fi) is its full kink
+    kappa = 2 S_+ (see axis_point).
+
+    both_halves=True adds the p* < 1/2 tie points by the symmetry E(p) = E(1-p): the mirror of
+    (i, j) at p* is (n-j, n-i) at 1-p*, with the same E, ln_fi, D and verdict, and
+    E'_-(1-p*) = -E'_+(p*), E'_+(1-p*) = -E'_-(p*).  F3 is NaN there (it is defined for p* > 1/2).
+    The axis appears once.
+
+    pool (a multiprocessing.Pool) with workers > 1 splits the screen into work-balanced i-chunks and
+    distributes the certifications; the result is identical however it is cut.
+    """
+    if pool is not None and workers > 1:
+        parts = pool.map(_screen_chunk, [(n, a, b) for a, b in work_chunks(n, workers)])
+        r = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    else:
+        r = screen(n, collect_all=True)
+    for k in ('tag_alt', 'rbnd'): r.pop(k, None)   # trigger diagnostics
+    o = np.argsort(r['pstar'], kind='stable')
+    r = {k: v[o] for k, v in r.items()}
+    aSm, aSp, aE, akap, apairs = axis_point(n)
+    axis = dict(i=0, j=n, pstar=0.5, ln_fi=np.log(akap/n), E=aE, S_minus=aSm,
+                F3=np.nan, tag=(TAG_MIN if aSm < 0 < aSp else 0))
+    for k in r: r[k] = np.concatenate([np.array([axis[k]], dtype=r[k].dtype), r[k]])
+    c = len(r['i'])
+    n_pairs = np.ones(c, np.int16); n_pairs[0] = apairs
+    decided = np.array(['double']*c, dtype=object)
+    decided[0] = 'symmetry'                # settled exactly by E(p) = E(1-p)
+    is_cusp = r['tag'] == TAG_MIN
+    checks = np.flatnonzero(r['tag'] == TAG_CHECK)
+    if len(checks):
+        args = [(n, int(r['i'][t]), int(r['j'][t])) for t in checks]
+        res = pool.map(_certify_one, args, chunksize=1) if pool is not None else [_certify_one(a) for a in args]
+        for t, (cusp, how) in zip(checks, res):
+            is_cusp[t] = cusp; decided[t] = how
+    r['n_tied_pairs'] = n_pairs; r['is_cusp'] = is_cusp; r['decided_by'] = decided
+    pq = r['pstar']*(1 - r['pstar'])
+    r['slope_left'] = r['S_minus']/pq
+    ln_D = np.log((r['j'] - r['i']).astype(float)) + r['ln_fi'] - np.log(pq)
+    r['log10_D'] = ln_D/np.log(10.0)
+    r['slope_right'] = r['slope_left'] + np.exp(ln_D)
+    r['slope_right'][0] = aSp/pq[0]                    # exact at the axis: E'_+ = -E'_-
+    if not both_halves:
+        return r
+    m = {k: v[:0:-1] for k, v in r.items()}           # rows 1..c-1, reversed: p* descending
+    m['i'], m['j'] = n - r['j'][:0:-1], n - r['i'][:0:-1]
+    m['pstar'] = 1 - r['pstar'][:0:-1]
+    m['slope_left'], m['slope_right'] = -r['slope_right'][:0:-1], -r['slope_left'][:0:-1]
+    m['S_minus'] = m['slope_left']*(m['pstar']*(1 - m['pstar']))
+    m['F3'] = np.full(c - 1, np.nan)
+    return {k: np.concatenate([m[k], r[k]]) for k in r}
