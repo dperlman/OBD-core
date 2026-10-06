@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+# numba's on-disk cache (cache=True writes it next to the source)
+*.nbi
+*.nbc
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/

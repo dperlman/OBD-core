@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obd-core"
+version = "0.1.0"
+description = "Core computational functions for the ordered binomial distribution: tie points, E(n,p), slopes and certified cusps"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["numpy", "numba", "mpmath"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/dperlman/OBD-core"
+
+[tool.setuptools]
+py-modules = ["obd_core"]

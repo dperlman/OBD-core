@@ -1,5 +1,5 @@
 """
-binom_core.py -- the shared mathematics for the ordered-binomial cusp project.
+obd_core.py -- the shared mathematics for the ordered-binomial projects (formerly binom_core.py).
 
 Every other script imports from here; nothing below is duplicated elsewhere.  Definitions:
 
