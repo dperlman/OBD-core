@@ -96,3 +96,22 @@ def test_tie_table_parallel_matches_serial():
         b = core.tie_table(n, both_halves=True, workers=4, pool=pool)
     for k in a:
         assert np.array_equal(a[k], b[k], equal_nan=(a[k].dtype.kind == "f")), k
+
+
+def test_certify_exact_settles_exact_zero():
+    # n=2, pair (1,2) at p*=2/3: S_- is exactly 0, which interval arithmetic cannot settle
+    assert core.certify_escalating(2, 1, 2)[0] is None
+    assert core.certify_exact(2, 1, 2) == "NOT"
+    t = core.tie_table(2, both_halves=True)
+    assert t["decided_by"].tolist() == ["exact", "symmetry", "exact"]
+    assert t["is_cusp"].tolist() == [False, True, False]
+
+
+def test_certify_exact_agrees_with_interval_arithmetic():
+    for n in (10, 37, 100):
+        for i in range(n // 2, n):
+            j = i + 1
+            if i + j <= n:
+                continue
+            v, _ = core.certify_escalating(n, i, j)
+            assert v is not None and core.certify_exact(n, i, j) == v, (n, i, j)

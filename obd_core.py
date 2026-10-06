@@ -425,10 +425,36 @@ def _screen_chunk(a):
     n, lo, hi = a
     return screen(n, collect_all=True, i_lo=lo, i_hi=hi)
 
+def certify_exact(n, i, j):
+    """Exact verdict for an ADJACENT pair j = i+1, whose tie point p* = (i+1)/(n+1) is rational.
+
+    Interval arithmetic cannot settle S_- = 0 exactly, which happens (n=2, pair (1,2), p*=2/3).
+    At a rational p* every mass is C(n,k)(i+1)^k (n-i)^(n-k) / (n+1)^n, so the signs of S_- and
+    S_+ follow from integers: rank the numerators F_k (left of p*: w_j = w_i - 1) and evaluate
+    (n+1) S_- (n+1)^n = sum_k w_k F_k ((n+1)k - n(i+1)), S_+ adding (n+1)(j-i) F_i.
+    Returns 'MIN', 'NOT', or None (not adjacent, or another exact tie makes the ranking ambiguous).
+    """
+    if j != i + 1:
+        return None
+    a, b = i + 1, n - i                      # p* = a/(n+1), q* = b/(n+1)
+    F = [comb(n, k) * a**k * b**(n - k) for k in range(n + 1)]
+    others = [F[k] for k in range(n + 1) if k not in (i, j)]
+    if len(set(others)) != len(others) or F[i] in others:
+        return None
+    order = sorted(range(n + 1), key=lambda k: (F[k], 0 if k == j else 1))
+    w = [0]*(n + 1)
+    for r, k in enumerate(order): w[k] = r
+    Sm = sum(w[k]*F[k]*((n + 1)*k - n*a) for k in range(n + 1))
+    Sp = Sm + (n + 1)*(j - i)*F[i]
+    return 'MIN' if Sm < 0 < Sp else 'NOT'
+
 def _certify_one(a):
     n, i, j = a
     v, how = certify_escalating(n, i, j)
-    return (v == 'MIN'), (how if v else 'UNRESOLVED')
+    if v is None:
+        v = certify_exact(n, i, j)
+        how = 'exact' if v else 'UNRESOLVED'
+    return (v == 'MIN'), how
 
 def tie_table(n, both_halves=False, workers=1, pool=None):
     """Every tie point of n, sorted by p*, with certified cusp verdicts and exact slopes.
@@ -437,7 +463,8 @@ def tie_table(n, both_halves=False, workers=1, pool=None):
         i, j, pstar, ln_fi, E, S_minus, F3, tag     as from screen(n, collect_all=True)
         n_tied_pairs    1 for an ordinary tie point
         is_cusp         bool, certified: CHECK-tagged rows go through certify_escalating
-        decided_by      'double', 'iv50'/'iv100'/'iv200', 'UNRESOLVED', or 'symmetry' (axis)
+        decided_by      'double', 'iv50'/'iv100'/'iv200', 'exact' (certify_exact, adjacent pairs),
+                        'UNRESOLVED', or 'symmetry' (axis)
         slope_left, slope_right    E'_- and E'_+ at p*
         log10_D         log10 of the slope jump D = E'_+ - E'_- = (j-i) f(i) / (p* q*), from ln_fi
                         and so exact far below double range.  NEVER take D as slope_right -
