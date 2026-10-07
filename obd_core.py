@@ -84,83 +84,6 @@ def E_at(n, p):
     return math.fsum((np.arange(n+1)*np.sort(f)).tolist())
 
 @njit(cache=True)
-def _E_slopes_one(n, lnC, p, rtol, f, k_lo):
-    """E, E'_- and E'_+ at one p in (0,1).  See E_slopes_at."""
-    lp = np.log(p); lq = np.log1p(-p)
-    s = 0.0; c = 0.0
-    for k in range(n+1):
-        v = np.exp(lnC[k] + k*lp + (n-k)*lq)
-        f[k] = v
-        t = s + v                                   # Neumaier-compensated normalising sum
-        if abs(s) >= abs(v): c += (s - t) + v
-        else: c += (v - t) + s
-        s = t
-    s += c
-    for k in range(n+1): f[k] /= s
-    order = np.argsort(f, kind='mergesort')
-    # Group masses that agree to within rtol (relative): at a tie point they are equal in exact
-    # arithmetic and their computed order is noise.  Just LEFT of a tie the larger index has the
-    # smaller mass (f_j/f_i grows with p for j > i), so the left ranking puts the larger index
-    # lower inside a group; the right ranking does the opposite.
-    El = 0.0; cE = 0.0; Sl = 0.0; cl = 0.0; Sr = 0.0; cr = 0.0
-    a = 0
-    while a <= n:
-        b = a
-        while b < n and f[order[b+1]] - f[order[b]] <= rtol*f[order[b+1]]:
-            b += 1
-        m = b - a + 1
-        for t in range(m):
-            k_lo[t] = order[a+t]
-        k_lo[:m].sort()                             # indices ascending
-        for t in range(m):
-            kr = k_lo[t]                            # right ranking: ascending index
-            kl = k_lo[m-1-t]                        # left ranking: descending index
-            r = a + t
-            vl = r*f[kl]*(kl - n*p); vr = r*f[kr]*(kr - n*p); ve = r*f[kl]
-            tt = Sl + vl
-            if abs(Sl) >= abs(vl): cl += (Sl - tt) + vl
-            else: cl += (vl - tt) + Sl
-            Sl = tt
-            tt = Sr + vr
-            if abs(Sr) >= abs(vr): cr += (Sr - tt) + vr
-            else: cr += (vr - tt) + Sr
-            Sr = tt
-            tt = El + ve
-            if abs(El) >= abs(ve): cE += (El - tt) + ve
-            else: cE += (ve - tt) + El
-            El = tt
-        a = b + 1
-    pq = p*(1.0 - p)
-    return El + cE, (Sl + cl)/pq, (Sr + cr)/pq
-
-def E_slopes_at(n, p, rtol=1e-9):
-    """E(n,p) and the exact one-sided slopes E'_-(p), E'_+(p) at every p of an array.
-
-    Returns three float64 arrays (E, slope_left, slope_right).  The slopes come from the ranking,
-    not from differences of E: E' = S/(p q) with S = sum_k w_k f(k)(k - n p).  Between tie points
-    slope_left == slope_right == E'(p).  AT a tie point -- a grid often hits one exactly, e.g.
-    p = 1/2 for every n, or (i+1)/(n+1) at a dyadic p -- E has a kink and the two differ by D.
-    Masses within relative rtol of each other are treated as tied (their computed order is
-    rounding noise there), so a p within ~rtol/(j-i) of a tie point is reported as at it.
-    Same mass convention as E_at (normalised by their own sum); E agrees with E_at to ~1e-15
-    relative.  At p = 0 and p = 1, E = n and both slopes are the one-sided limits -n and +n.
-    Descriptive, not certified.
-    """
-    p = np.atleast_1d(np.asarray(p, dtype=np.float64))
-    lnC = lnC_arr(n)
-    E = np.empty(p.size); sl = np.empty(p.size); sr = np.empty(p.size)
-    f = np.empty(n+1); k_lo = np.empty(n+1, np.int64)
-    for t in range(p.size):
-        pt = float(p[t])
-        if pt <= 0.0:
-            E[t], sl[t], sr[t] = n, -n, -n
-        elif pt >= 1.0:
-            E[t], sl[t], sr[t] = n, n, n
-        else:
-            E[t], sl[t], sr[t] = _E_slopes_one(n, lnC, pt, rtol, f, k_lo)
-    return E, sl, sr
-
-@njit(cache=True)
 def _err_bounds(n, lnC, i, j, md, q, lnp, lnq):
     """Error bounds for the sharpened re-ranking trigger.  Returns (dp, df0, dstep).
 
@@ -189,32 +112,17 @@ def _err_bounds(n, lnC, i, j, md, q, lnp, lnq):
     return dp, df0, 3.0*EPS
 
 @njit(cache=True)
-def _one_tie(n, lnC, i, j, f, w):
-    """All quantities for a single tie point.  The ONLY place the masses and ranks are computed.
+def _masses(n, lnC, md, lnp, lnq, rho, lo_req, hi_req, f):
+    """Binomial masses by recurrence outwards from the mode md, into f[lo..hi].  The ONLY place the
+    masses are built; _one_tie (tie points) and _E_slopes_one (arbitrary p) both call it.
 
-    Returns (p, ln_fi, E, S_minus, kappa, F3, tag).  Only the masses at or above TINY are touched
-    (see the window comment in the body); the rest are exactly zero and change no result.
-    Masses are always normalised by their own sum:
-    unnormalised they carry a shared relative error ~6e-13 from exp/lgamma (they sum to
-    0.999999999999363 at n=2000), which leaves only ~3.6 digits on E - E(1/2) instead of ~6.3.
-    f and w are scratch buffers of length n+1, passed in so a loop can reuse them.
+    Only the masses at or above TINY can affect anything: the rest are zeroed, contribute exactly
+    0.0 to every sum, and sit as an equal block at the bottom of the ranking.  The masses fall away
+    monotonically from the mode, so once the recurrence drops below TINY it stays below and we can
+    stop -- giving a window [lo,hi] of width O(sqrt(n)) instead of n+1.  The recurrence is not
+    allowed to stop before lo_req on the left or hi_req on the right.  Unnormalised; returns
+    (lo, hi).  Entries of f outside [lo,hi] are not written.
     """
-    m = j - i
-    lnrho = (lnC[i] - lnC[j]) / m
-    p = 1.0/(1.0 + np.exp(-lnrho)); q = 1.0 - p; rho = p/q
-    lnp = np.log(p); lnq = np.log(q)
-    md = int(np.floor((n+1)*p))                  # mode of Bin(n,p)
-    if md > n: md = n
-    # Only the masses at or above TINY can affect anything: the rest are zeroed below, contribute
-    # exactly 0.0 to every sum, and sit as an equal block at the bottom of the ranking.  The masses
-    # fall away monotonically from the mode, so once the recurrence drops below TINY it stays below
-    # and we can stop -- giving a window [lo,hi] of width O(sqrt(n)) instead of n+1.
-    # The one trap: f[j] = f[i] below is applied AFTER zeroing, so it can rescue a j that fell just
-    # under TINY.  f(i) is known in closed form, so when the pair is above TINY we refuse to stop
-    # before reaching i on the left and j on the right, and the rescue still happens.
-    pair_in = (lnC[i] + i*lnp + (n-i)*lnq) >= LN_TINY
-    lo_req = i if pair_in else md
-    hi_req = j if pair_in else md
     f[md] = np.exp(lnC[md] + md*lnp + (n-md)*lnq)
     k = md
     while k > 0:                                 # leftwards: f_{k-1} = f_k * k/((n-k+1) rho)
@@ -230,6 +138,33 @@ def _one_tie(n, lnC, i, j, f, w):
     hi = k
     for k in range(lo, hi+1):                    # masses below TINY are numerically zero
         if f[k] < TINY: f[k] = 0.0
+    return lo, hi
+
+@njit(cache=True)
+def _one_tie(n, lnC, i, j, f, w):
+    """All quantities for a single tie point.  The masses come from _masses, the one place they are built.
+
+    Returns (p, ln_fi, E, S_minus, kappa, F3, tag).  Only the masses at or above TINY are touched
+    (see the window comment in the body); the rest are exactly zero and change no result.
+    Masses are always normalised by their own sum:
+    unnormalised they carry a shared relative error ~6e-13 from exp/lgamma (they sum to
+    0.999999999999363 at n=2000), which leaves only ~3.6 digits on E - E(1/2) instead of ~6.3.
+    f and w are scratch buffers of length n+1, passed in so a loop can reuse them.
+    """
+    m = j - i
+    lnrho = (lnC[i] - lnC[j]) / m
+    p = 1.0/(1.0 + np.exp(-lnrho)); q = 1.0 - p; rho = p/q
+    lnp = np.log(p); lnq = np.log(q)
+    md = int(np.floor((n+1)*p))                  # mode of Bin(n,p)
+    if md > n: md = n
+    # Masses below TINY are zeroed (see _masses).  The one trap: f[j] = f[i] below is applied AFTER
+    # zeroing, so it can rescue a j that fell just under TINY.  f(i) is known in closed form, so
+    # when the pair is above TINY we refuse to stop before reaching i on the left and j on the
+    # right, and the rescue still happens.
+    pair_in = (lnC[i] + i*lnp + (n-i)*lnq) >= LN_TINY
+    lo_req = i if pair_in else md
+    hi_req = j if pair_in else md
+    lo, hi = _masses(n, lnC, md, lnp, lnq, rho, lo_req, hi_req, f)
     f[j] = f[i]                                  # exact tie
     nz = lo + (n - hi)                           # masses outside the window: all exactly zero,
                                                  # so they take ranks 0..nz-1 as an equal block
@@ -494,6 +429,93 @@ def recheck(n, i, j, dps=50):
                     ("slope_left",Sm/(p*q)),("slope_right",Sp/(p*q))):
         print(f"  {name:12s} {nstr(v, dps-10)}")
     print("  cusp:", Sm < 0 < Sp)
+
+@njit(cache=True)
+def _E_slopes_one(n, lnC, p, tol, f, k_lo):
+    """E, E'_- and E'_+ at one p in (0,1).  See E_slopes_at."""
+    q = 1.0 - p; rho = p/q
+    lnp = np.log(p); lnq = np.log(q)
+    md = int(np.floor((n+1)*p))                  # mode of Bin(n,p)
+    if md > n: md = n
+    lo, hi = _masses(n, lnC, md, lnp, lnq, rho, md, md, f)
+    s = 0.0; comp = 0.0                          # Neumaier sum, then rescale (as _one_tie)
+    for k in range(lo, hi+1):
+        t = s + f[k]
+        if abs(s) >= abs(f[k]): comp += (s - t) + f[k]
+        else:                   comp += (f[k] - t) + s
+        s = t
+    s = s + comp
+    inv = 1.0/s
+    for k in range(lo, hi+1): f[k] *= inv
+    nz = lo + (n - hi)                           # masses outside the window are exactly zero: they
+    w = hi - lo + 1                              # take ranks 0..nz-1 as an equal block, add nothing
+    order = np.argsort(f[lo:hi+1], kind='mergesort') + lo
+    # Group masses equal to within tol (relative): at a tie point they are equal in exact
+    # arithmetic and their computed order is rounding noise.  Just LEFT of a tie the larger index
+    # has the smaller mass (f_j/f_i grows with p for j > i), so the left ranking puts the larger
+    # index lower inside a group; the right ranking does the opposite.
+    El = 0.0; cE = 0.0; Sl = 0.0; cl = 0.0; Sr = 0.0; cr = 0.0
+    a = 0
+    while a < w:
+        b = a
+        while b < w - 1 and f[order[b+1]] - f[order[b]] <= tol*f[order[b+1]]:
+            b += 1
+        m = b - a + 1
+        for t in range(m):
+            k_lo[t] = order[a+t]
+        k_lo[:m].sort()                          # indices ascending
+        for t in range(m):
+            kr = k_lo[t]                         # right ranking: ascending index
+            kl = k_lo[m-1-t]                     # left ranking: descending index
+            r = nz + a + t
+            vl = r*f[kl]*(kl - n*p); vr = r*f[kr]*(kr - n*p); ve = r*f[kl]
+            tt = Sl + vl
+            if abs(Sl) >= abs(vl): cl += (Sl - tt) + vl
+            else: cl += (vl - tt) + Sl
+            Sl = tt
+            tt = Sr + vr
+            if abs(Sr) >= abs(vr): cr += (Sr - tt) + vr
+            else: cr += (vr - tt) + Sr
+            Sr = tt
+            tt = El + ve
+            if abs(El) >= abs(ve): cE += (El - tt) + ve
+            else: cE += (ve - tt) + El
+            El = tt
+        a = b + 1
+    pq = p*q
+    return El + cE, (Sl + cl)/pq, (Sr + cr)/pq
+
+def E_slopes_at(n, p):
+    """E(n,p) and the exact one-sided slopes E'_-(p), E'_+(p) at every p of an array.
+
+    Returns three float64 arrays (E, slope_left, slope_right).  The slopes come from the ranking,
+    not from differences of E: E' = S/(p q) with S = sum_k w_k f(k)(k - n p).  Between tie points
+    slope_left == slope_right == E'(p).  AT a tie point -- a grid often hits one exactly, e.g.
+    p = 1/2 for every n, or (i+1)/(n+1) at a dyadic p -- E has a kink and the two differ by D.
+    Masses within relative tol = 64 EPS (n+1)/(p q) of each other are treated as tied: that bounds
+    both their own rounding error (~n EPS) and the spread a correctly rounded tie point leaves
+    between two tied masses ((j-i) ulp(p)/(p q)).  It must stay that tight: tie points of
+    different pairs can sit ~1e-12 apart (n=1000 has thousands), and a looser tolerance merges
+    them and reports a kink that is not there.  So p is reported as AT a tie only within
+    ~tol p q/(j-i) of it.
+    Same mass convention as E_at (normalised by their own sum); E agrees with E_at to ~1e-15
+    relative.  At p = 0 and p = 1, E = n and both slopes are the one-sided limits -n and +n.
+    Descriptive, not certified.
+    """
+    p = np.atleast_1d(np.asarray(p, dtype=np.float64))
+    lnC = lnC_arr(n)
+    E = np.empty(p.size); sl = np.empty(p.size); sr = np.empty(p.size)
+    f = np.empty(n+1); k_lo = np.empty(n+1, np.int64)
+    for t in range(p.size):
+        pt = float(p[t])
+        if pt <= 0.0:
+            E[t], sl[t], sr[t] = n, -n, -n
+        elif pt >= 1.0:
+            E[t], sl[t], sr[t] = n, n, n
+        else:
+            tol = 64.0*EPS*(n + 1)/(pt*(1.0 - pt))
+            E[t], sl[t], sr[t] = _E_slopes_one(n, lnC, pt, tol, f, k_lo)
+    return E, sl, sr
 
 # ---------------------------------------------------------------------------------------------
 # Every tie point of one n, certified: the bulk table that dump_ties.py and the OBD repo build on.

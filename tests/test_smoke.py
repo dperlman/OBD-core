@@ -139,6 +139,6 @@ def test_E_slopes_at_tie_points_match_the_kernel():
 
 def test_E_slopes_at_ends_and_last_tie():
     E, sl, sr = core.E_slopes_at(3, [0.0, 0.75, 1.0])
-    assert E.tolist() == [3.0, 2.25, 3.0]
-    assert sl.tolist() == [-3.0, 0.75, 3.0]   # (2,3) at 3/4: left 0.75, right n (E = n p above it)
-    assert sr.tolist() == [-3.0, 3.0, 3.0]
+    assert E == pytest.approx([3.0, 2.25, 3.0], rel=1e-14)
+    assert sl == pytest.approx([-3.0, 0.75, 3.0], rel=1e-12)   # (2,3) at 3/4: left 0.75,
+    assert sr == pytest.approx([-3.0, 3.0, 3.0], rel=1e-12)    # right n (E = n p above it)
