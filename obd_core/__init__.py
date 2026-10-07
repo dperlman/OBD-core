@@ -75,7 +75,8 @@ from numba import njit
 
 # The numerical stack every environment that runs this module should have, exactly.  Different
 # numba/llvmlite/numpy builds can change the last bit of exp/log and so of every descriptive column,
-# and numba's on-disk cache is per numba version.  Both repos install with
+# and numba's on-disk cache is per numba version.  Bit-identity holds on one platform: Linux x86-64
+# and macOS arm64 differ in the last bits even with identical pins (their libm), as CI shows.  Both repos install with
 #     pip install -c constraints.txt ...
 # (constraints.txt is generated from this dict; tests/test_pins.py keeps them equal).  Importing
 # in an environment that differs only warns: verdicts do not depend on the last bit, but byte-for-

@@ -165,7 +165,9 @@ never to build tables.
 
 Every environment that runs `obd_core` should have exactly the versions in
 [`constraints.txt`](constraints.txt) (numpy, numba, llvmlite, mpmath). Then results agree to the
-last bit across environments, and numba's compiled-code cache, which is per numba version, stays
-valid. Install with the constraints file, as above. Importing `obd_core` in an environment that
+last bit across environments on the same platform, and numba's compiled-code cache, which is per
+numba version, stays valid. Different platforms (say Linux x86-64 against macOS arm64) still
+differ in the last bits, because their maths libraries round `exp` and `log` differently; cusp
+verdicts never depend on that. Install with the constraints file, as above. Importing `obd_core` in an environment that
 differs warns (`obd_core.pin_mismatches()` lists the differences). The pins live in
 `obd_core.NUMERIC_PINS`; `constraints.txt` is generated from it, and a test keeps them equal.

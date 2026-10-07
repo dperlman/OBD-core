@@ -129,12 +129,18 @@ def test_E_slopes_at_between_ties_matches_central_difference():
 
 
 def test_E_slopes_at_tie_points_match_the_kernel():
+    # Two independent double-precision computations of the same slopes: each may be off by the
+    # measured bound reference.expected_double_error(n), so they may differ by twice it (relative,
+    # floor 1).  A hand-picked 1e-9 passed on macOS arm64 (worst 7e-10) but not on Linux x86-64,
+    # whose libm rounds exp/log differently in the last bits.
+    from obd_core.reference import expected_double_error
     for n in (100, 1000):
         t = core.tie_table(n)
         E, sl, sr = core.E_slopes_at(n, t["pstar"])
-        assert np.allclose(sl, t["slope_left"], rtol=1e-9, atol=1e-9)
-        assert np.allclose(sr, t["slope_right"], rtol=1e-9, atol=1e-9)
-        assert np.allclose(E, t["E"], rtol=1e-13)
+        tol = expected_double_error(n)
+        for got, want in ((sl, t["slope_left"]), (sr, t["slope_right"])):
+            assert np.all(np.abs(got - want) <= 2 * tol["slopes"] * np.maximum(1.0, np.abs(want)))
+        assert np.all(np.abs(E - t["E"]) <= 2 * tol["E"] * np.maximum(1.0, np.abs(t["E"])))
 
 
 def test_E_slopes_at_ends_and_last_tie():
