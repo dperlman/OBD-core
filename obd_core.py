@@ -52,6 +52,42 @@ import numpy as np
 from math import comb, lgamma, log as _log
 from numba import njit
 
+# The numerical stack every environment that runs this module should have, exactly.  Different
+# numba/llvmlite/numpy builds can change the last bit of exp/log and so of every descriptive column,
+# and numba's on-disk cache is per numba version.  Both repos install with
+#     pip install -c constraints.txt ...
+# (constraints.txt is generated from this dict; tests/test_pins.py keeps them equal).  Importing
+# in an environment that differs only warns: verdicts do not depend on the last bit, but byte-for-
+# byte agreement between environments is no longer guaranteed.
+NUMERIC_PINS = {"numpy": "2.3.5", "numba": "0.63.1", "llvmlite": "0.46.0", "mpmath": "1.4.0"}
+
+def pin_mismatches():
+    """{package: installed version} for every NUMERIC_PINS entry the running environment differs on."""
+    from importlib.metadata import version, PackageNotFoundError
+    out = {}
+    for pkg, want in NUMERIC_PINS.items():
+        try:
+            have = version(pkg)
+        except PackageNotFoundError:
+            have = None
+        if have != want:
+            out[pkg] = have
+    return out
+
+def _warn_on_pin_mismatch():
+    bad = pin_mismatches()
+    if bad:
+        import warnings
+        warnings.warn(
+            "obd_core: numerical stack differs from NUMERIC_PINS ("
+            + ", ".join(f"{k} {v} != {NUMERIC_PINS[k]}" for k, v in sorted(bad.items()))
+            + "); results may differ in the last bit from other environments.  "
+            "Install with: pip install -c constraints.txt (from the OBD-core repo).",
+            stacklevel=3,
+        )
+
+_warn_on_pin_mismatch()
+
 MARGIN, GAP, TINY = 1e-6, 1e-8, 1e-290
 LN_TINY = _log(TINY)                 # window test in _one_tie; do not hardcode this
 EPS = 2.0**-53                       # unit roundoff, for the sharpened trigger's error bounds

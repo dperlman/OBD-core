@@ -8,10 +8,11 @@ The core computational functions for the ordered binomial distribution, shared b
 ## Install
 
 ```bash
-pip install "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.3.2"
+pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.3.3/constraints.txt \
+    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.3.3"
 ```
 
-For development, clone it and install editable: `pip install -e path/to/OBD-core`.
+For development, clone it and install editable: `pip install -c constraints.txt -e path/to/OBD-core`.
 
 ## Use
 
@@ -26,3 +27,12 @@ certified cusp verdict, the exact one-sided slopes and `log10_D`, the log of the
 `core.E_slopes_at(n, p_array)` gives E and the exact one-sided slopes at arbitrary p (for grids).
 
 Dependencies: numpy, numba, mpmath.  Tests: `pip install -e ".[test]"` then `pytest`.
+
+## One numerical stack
+
+Every environment that runs `obd_core` should have exactly the versions in
+[`constraints.txt`](constraints.txt) (numpy, numba, llvmlite, mpmath), so that results agree to
+the last bit across environments and numba's compiled-code cache, which is per numba version,
+stays valid.  Install with the constraints file, as above.
+Importing `obd_core` in an environment that differs warns (`obd_core.pin_mismatches()` lists
+the differences).  The pins live in `obd_core.NUMERIC_PINS`; `constraints.txt` is generated from it.

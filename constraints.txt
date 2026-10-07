@@ -1,0 +1,6 @@
+# Generated from obd_core.NUMERIC_PINS -- edit that dict, then this file (tests/test_pins.py checks).
+# Every environment that runs obd_core installs with:  pip install -c constraints.txt ...
+llvmlite==0.46.0
+mpmath==1.4.0
+numba==0.63.1
+numpy==2.3.5
