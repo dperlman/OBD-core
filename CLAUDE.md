@@ -50,6 +50,9 @@ updated in the same piece of work.
 6. **Never tag a release on failing tests.** `pytest | tail -1 && git tag ...` tags even when tests
    fail, because the pipe returns tail's status. v0.3.0 shipped broken exactly that way. Run
    pytest on its own and gate on its exit code.
+7. **CI must be green.** `.github/workflows/tests.yml` runs the whole suite on Linux and macOS
+   (Apple Silicon) with the pinned stack on every push to `main`, every tag and every pull
+   request. Check it (`gh run list --repo dperlman/OBD-core --limit 3`) before tagging a release.
 
 ## Releasing
 
@@ -61,7 +64,8 @@ updated in the same piece of work.
    ```
    The `obd` env runs the *installed* release, so to test unreleased code there, install the
    working tree first (`pip install -c constraints.txt .`). Reinstall the tag afterwards.
-3. Commit, `git tag -a vX.Y.Z -m "..."`, then `git push origin main vX.Y.Z`.
+3. Commit and push `main`; wait for CI on that commit to pass (rule 7); then
+   `git tag -a vX.Y.Z -m "..."` and `git push origin vX.Y.Z` (CI runs on the tag too).
 4. Consumers: bump the tag in OBD's `requirements.txt`, `pyproject.toml` and `environment.yml`
    (on a branch, with a PR; OBD uses PRs), then reinstall in the `obd` env:
    `pip install -c <constraints URL at the tag> "obd-core @ git+https://github.com/dperlman/OBD-core.git@vX.Y.Z"`.

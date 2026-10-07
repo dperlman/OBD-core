@@ -1,0 +1,32 @@
+name: tests
+
+# Run the whole test suite on every push and pull request, with the pinned numerical stack
+# (constraints.txt).  tests/test_pins.py fails if the installed versions are not exactly the pins.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]     # macos-latest is Apple Silicon, like the dev machine
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install (pinned numerical stack)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints.txt -e ".[test]"
+      - name: Show versions
+        run: python -c "import numpy, numba, llvmlite, mpmath, obd_core; print(numpy.__version__, numba.__version__, llvmlite.__version__, mpmath.__version__, obd_core.pin_mismatches())"
+      - name: Test
+        run: python -m pytest -q -p no:cacheprovider tests

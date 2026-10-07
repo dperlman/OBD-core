@@ -1,5 +1,7 @@
 # OBD-core
 
+[![tests](https://github.com/dperlman/OBD-core/actions/workflows/tests.yml/badge.svg)](https://github.com/dperlman/OBD-core/actions/workflows/tests.yml)
+
 The core computational functions for the ordered binomial distribution, shared by
 [ordered-binomial-cusps](https://github.com/dperlman/ordered-binomial-cusps) (the research: every
 proved and screened result lives there) and [OBDExplorer](https://github.com/dperlman/OBDExplorer)
