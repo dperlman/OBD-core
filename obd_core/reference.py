@@ -37,6 +37,7 @@ API
     at(n, p, dps=50, max_dps=800) -> PointRef       E and both one-sided slopes at any p
     compare_tie(n, i, j, **values) -> dict          relative errors of your values vs the reference
     check_tie_table(n, table, rows=None) -> dict    the same over rows of obd_core.tie_table(n)
+    check_invariants(n, table) -> dict              proved bounds checked on EVERY row (fast)
     expected_double_error(n) -> dict                how close obd_core's double values should be
     Value, TieRef, PointRef, ReferenceUndecided
 
@@ -58,7 +59,7 @@ from mpmath import iv, mp
 
 __all__ = [
     "Value", "TieRef", "PointRef", "ReferenceUndecided",
-    "tie", "axis", "at", "compare_tie", "check_tie_table", "expected_double_error",
+    "tie", "axis", "at", "compare_tie", "check_tie_table", "expected_double_error", "check_invariants",
 ]
 
 # Exact arithmetic at a rational p = a/b builds n+1 integers of ~n log2(max(a, b-a)) bits each.
@@ -563,3 +564,53 @@ def check_tie_table(n: int, table: dict, rows=None, sample: int = 25, seed: int 
              "slope_right": tol["slopes"], "log10_D": tol["log10_D"]}
     return {"max": worst, "worst_row": worst_row, "verdicts_ok": verdicts_ok, "rows": rows,
             "within_expected": all(worst[f] <= limit[f] for f in fields)}
+
+
+def check_invariants(n: int, table: dict) -> dict:
+    """Check every row of a tie table against bounds that follow from the definitions.  Fast.
+
+    ``table``: dict of arrays sorted by p, as ``obd_core.tie_table(n, ...)`` returns (or OBD's tie
+    tables): ``pstar`` (or ``p``), ``E``, ``slope_left``, ``slope_right``, ``log10_D``.  These are
+    necessary conditions, not a reference comparison, so they cost microseconds per row and catch a
+    single corrupt row among millions -- which sampling ``check_tie_table`` would almost surely miss.
+
+    The bounds (q = 1 - p, K ~ Bin(n, p)):
+      * ``p_order``    0 < p < 1, strictly increasing
+      * ``E_range``    0 <= E <= n                       (ranks are 0..n, masses sum to 1)
+      * ``slope_order`` slope_right >= slope_left       (the kink D > 0)
+      * ``log10_D``    finite
+      * ``slope_bound`` |E'| <= n^1.5 / (2 sqrt(pq)): S = sum (w_k - n/2) f(k)(k - np) since
+                       sum f(k)(k - np) = 0, so |S| <= (n/2) E|K - np| <= (n/2) sqrt(npq), and
+                       E' = S / (pq)
+      * ``E_lipschitz`` |E(p_b) - E(p_a)| <= max |E'| (p_b - p_a) between neighbouring tie points
+                       (E is continuous), with max |E'| taken at the end where pq is smaller
+    Each bound gets a relative slack of 1e-9 plus a few units of double rounding.  Returns
+    {"ok": bool, "violations": {check: count}, "first_bad_row": {check: row}}.
+    """
+    import numpy as np
+
+    n = int(n)
+    p = np.asarray(table["pstar"] if "pstar" in table else table["p"], dtype=float)
+    E = np.asarray(table["E"], dtype=float)
+    sl = np.asarray(table["slope_left"], dtype=float)
+    sr = np.asarray(table["slope_right"], dtype=float)
+    ld = np.asarray(table["log10_D"], dtype=float)
+    eps = 1e-9
+    pq = p * (1.0 - p)
+    bound = n ** 1.5 / (2.0 * np.sqrt(np.where(pq > 0, pq, np.nan)))
+    bad = {
+        "p_order": (p <= 0) | (p >= 1) | np.r_[False, np.diff(p) <= 0],
+        "E_range": (E < -eps * n) | (E > n * (1 + eps)) | ~np.isfinite(E),
+        "slope_order": ~(sr >= sl),
+        "log10_D": ~np.isfinite(ld),
+        "slope_bound": ~((np.abs(sl) <= bound * (1 + eps)) & (np.abs(sr) <= bound * (1 + eps))),
+    }
+    lip = np.zeros(p.size, dtype=bool)
+    if p.size > 1:
+        steep = np.maximum(bound[:-1], bound[1:])
+        jump = np.abs(np.diff(E))
+        lip[1:] = jump > steep * np.diff(p) * (1 + eps) + 1e-12 * n
+    bad["E_lipschitz"] = lip
+    violations = {k: int(v.sum()) for k, v in bad.items()}
+    first = {k: int(np.flatnonzero(v)[0]) for k, v in bad.items() if v.any()}
+    return {"ok": not any(violations.values()), "violations": violations, "first_bad_row": first}

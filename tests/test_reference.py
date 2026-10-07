@@ -113,3 +113,30 @@ def test_value_helpers():
     assert v.exact and v.contains(Fraction(1, 3)) and not v.contains(0.3333333333333333)
     assert v.rel_err(1 / 3) < 1e-16
     assert Value(Fraction(-1), Fraction(-1)).sign() == -1
+
+
+@pytest.mark.parametrize("n", [2, 3, 10, 100, 978, 1000])
+def test_invariants_hold_on_every_row(n):
+    t = core.tie_table(n, both_halves=True)
+    res = ref.check_invariants(n, t)
+    assert res["ok"], res
+
+
+def test_invariants_catch_the_n978_corruption():
+    # the row obd_core v0.3.1 and earlier could produce from a stale buffer (E = 492, slopes 958972)
+    t = core.tie_table(978, both_halves=True)
+    k = np.flatnonzero((t["i"] == 1) & (t["j"] == 978))[0]
+    for col, val in (("E", 492.0), ("slope_left", 958972.78), ("slope_right", 958972.78)):
+        t[col] = t[col].copy()
+        t[col][k] = val
+    res = ref.check_invariants(978, t)
+    assert not res["ok"]
+    assert res["first_bad_row"]["slope_bound"] == k and res["first_bad_row"]["E_lipschitz"] == k
+
+
+def test_kernel_at_n1000_against_the_reference():
+    # 50 random rows of both halves at n = 1000 (plus the first and last), checked rigorously
+    t = core.tie_table(1000, both_halves=True)
+    res = ref.check_tie_table(1000, t, sample=50, seed=2026)
+    assert res["verdicts_ok"]
+    assert res["within_expected"], res["max"]

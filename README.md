@@ -15,13 +15,14 @@ It has two parts:
 | `obd_core` | the fast implementation: numba kernel, certified cusp verdicts, exact slopes | double (verdicts certified) | producing tables, plots, anything in bulk |
 | `obd_core.reference` | an independent rigorous implementation | exact rationals or interval arithmetic | checking `obd_core`, investigating one value, tests |
 
-Working **on** this package (changing it, releasing it)? Read [CLAUDE.md](CLAUDE.md) first.
+Working **on** this package (changing it, releasing it)? Read [CLAUDE.md](CLAUDE.md) first. What
+changed in each release: [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
 ```bash
-pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.4.0/constraints.txt \
-    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.4.0"
+pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.5.0/constraints.txt \
+    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.5.0"
 ```
 
 The `-c constraints.txt` pins numpy, numba, llvmlite and mpmath to exact versions (see
@@ -140,6 +141,7 @@ ref.expected_double_error(1000)        # how close obd_core's doubles should be
 | `at(n, p, dps=50, max_dps=800)` | `PointRef`: `p, E, slope_left, slope_right, D` (Values), `tied` (groups of indices with equal masses at p), `method` |
 | `compare_tie(n, i, j, **values)` | `{name: rel_err}` for numbers, `{"is_cusp": agree?}`, `"reference"`: the TieRef |
 | `check_tie_table(n, table, rows=None, sample=25)` | worst errors over rows of `obd_core.tie_table(n)`, verdict agreement, `within_expected` |
+| `check_invariants(n, table)` | proved bounds (0 ≤ E ≤ n, slope ordering and bound, E continuity, …) on **every** row, in milliseconds; catches a single corrupt row that sampling would miss |
 | `expected_double_error(n)` | `{"p", "E", "slopes", "log10_D"}`: the empirical bounds |
 
 `Value`: `.lo`, `.hi`, `.exact`, `.mid`, `.rad` (mpmath numbers), `float(v)`, `.sign()` (+1/−1/0,
@@ -154,8 +156,8 @@ never to build tables.
 - **A value looks wrong.** Run `ref.tie(n, i, j)` (or `obd_core.recheck(n, i, j)` to print it)
   and compare with the suspect value. A gap beyond `expected_double_error(n)` is a bug, not
   rounding. That is how the n = 978 buffer bug (E = 492 instead of 953.54) was pinned down.
-- **Testing new code that produces tie data.** Sample rows and call `check_tie_table`; assert
-  `verdicts_ok` and `within_expected`.
+- **Testing new code that produces tie data.** Run `check_invariants` on every table (cheap) and
+  `check_tie_table` on a sample; assert `ok`, `verdicts_ok` and `within_expected`.
 - **E or the slope on a grid.** `obd_core.E_slopes_at`. Never difference E numerically: E has
   kinks at every tie point, and a finite difference across one measures the curvature, not the slope.
 - **Is this tie point a cusp?** `tie_table(n)["is_cusp"]` (proved), or `ref.tie(n, i, j).is_cusp`

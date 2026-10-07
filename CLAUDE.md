@@ -56,7 +56,8 @@ updated in the same piece of work.
 
 ## Releasing
 
-1. Bump `version` in `pyproject.toml` and the version in the README install line.
+1. Bump `version` in `pyproject.toml` and the version in the README install line, and add the
+   release to `CHANGELOG.md` (say whether it is numerically identical; if not, what changes).
 2. Run the tests in both environments, each gated on its own exit code:
    ```bash
    ~/git/ordered-binomial-cusps/.venv/bin/python -m pytest -q -p no:cacheprovider tests
