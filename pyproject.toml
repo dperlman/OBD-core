@@ -18,4 +18,4 @@ test = ["pytest"]
 Repository = "https://github.com/dperlman/OBD-core"
 
 [tool.setuptools]
-py-modules = ["obd_core"]
+packages = ["obd_core"]
