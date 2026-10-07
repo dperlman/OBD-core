@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "obd-core"
-version = "0.3.3"
-description = "Core computational functions for the ordered binomial distribution: tie points, E(n,p), slopes and certified cusps"
+version = "0.4.0"
+description = "Core computational functions for the ordered binomial distribution: tie points, E(n,p), slopes, certified cusps, and an independent rigorous reference"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

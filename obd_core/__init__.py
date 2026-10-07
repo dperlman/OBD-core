@@ -1,7 +1,28 @@
 """
-obd_core.py -- the shared mathematics for the ordered-binomial projects (formerly binom_core.py).
+obd_core -- the shared mathematics for the ordered-binomial projects (formerly binom_core.py).
 
-Every other script imports from here; nothing below is duplicated elsewhere.  Definitions:
+The only implementation of it: ordered-binomial-cusps (research) and OBD (visualization) both
+import this, and nothing below is duplicated elsewhere.  Full guide with examples and pitfalls:
+README.md at https://github.com/dperlman/OBD-core (rules for changing the package: CLAUDE.md).
+
+Start here
+    tie_table(n, both_halves=False)  every tie point of n: p*, E, exact slopes, log10_D, proved
+                                     cusp verdict (dict of numpy arrays; row 0 = the axis p=1/2)
+    E_slopes_at(n, p_array)          E and the exact one-sided slopes at any p (grids)
+    E_at(n, p), E_half(n)            E at one p / at 1/2
+    evaluate(n, i, j)                one tie point in double precision
+    certify*(n, i, j)                proved verdict for one tie point (tie_table already does this)
+    recheck(n, i, j)                 print every quantity at one tie point, rigorously
+    obd_core.reference               independent exact / interval-arithmetic values for CHECKING
+                                     this module: reference.tie, .at, .axis, .compare_tie,
+                                     .check_tie_table, .expected_double_error
+    NUMERIC_PINS, pin_mismatches()   the pinned numpy/numba/llvmlite/mpmath versions
+
+Precision: cusp verdicts are proved; E, S_-, slopes and p* are plain double precision, accurate
+to reference.expected_double_error(n) (slopes ~1e-9 relative at n=1000).  Never take the slope
+jump D as slope_right - slope_left; use log10_D.
+
+Definitions:
 
     f_p(k) = C(n,k) p^k (1-p)^(n-k),  k = 0..n
     p*     = tie point of masses i<j (0<=i<j<=n, i+j>n so p*>1/2): f(i)=f(j);
@@ -457,21 +478,22 @@ def evaluate(n, i, j, lnC=None):
     return p, E, F3, Sm, Sp, Sm/(p*q), Sp/(p*q)
 
 def recheck(n, i, j, dps=50):
-    """High-precision values for one tie point, printed."""
-    from mpmath import mp, mpf, nstr
-    mp.dps = dps; m = j-i
-    rho = (mpf(comb(n,i))/comb(n,j))**(mpf(1)/m); p = rho/(1+rho); q = 1-p
-    f = [comb(n,k)*p**k*q**(n-k) for k in range(n+1)]
-    order = sorted(range(n+1), key=lambda k: (f[i] if k in (i,j) else f[k], 0 if k==j else 1))
-    w = [0]*(n+1)
-    for r, k in enumerate(order): w[k] = r
-    Sm = sum(w[k]*f[k]*(k-n*p) for k in range(n+1)); Sp = Sm + m*f[i]
-    E = sum(w[k]*f[k] for k in range(n+1)); F3 = (n+i-j)*(i+j-2*n*p) + (j-n*p)
-    print(f"n={n} i={i} j={j}  ({dps} digits)")
-    for name, v in (("p*",p),("E",E),("F3",F3),("S_-",Sm),("S_+",Sp),
-                    ("slope_left",Sm/(p*q)),("slope_right",Sp/(p*q))):
-        print(f"  {name:12s} {nstr(v, dps-10)}")
-    print("  cusp:", Sm < 0 < Sp)
+    """Print every quantity at one tie point from the rigorous reference (``reference.tie``).
+
+    For the ordered-binomial-cusps CLI (``cusps_fast.py --recheck n i j``).  In code, call
+    ``obd_core.reference.tie`` and use its ``Value`` fields instead of parsing this output.
+    """
+    from mpmath import mp, nstr
+    from . import reference
+    r = reference.tie(n, i, j, dps=dps)
+    print(f"n={n} i={i} j={j}  ({r.method}; every value is a rigorous enclosure, shown as mid +/- rad)")
+    with mp.workdps(dps):
+        for name, v in (("p*", r.p), ("E", r.E), ("F3", r.F3), ("S_-", r.S_minus), ("S_+", r.S_plus),
+                        ("slope_left", r.slope_left), ("slope_right", r.slope_right),
+                        ("log10_D", r.log10_D)):
+            if v is not None:
+                print(f"  {name:12s} {nstr(v.mid, dps - 10)}   +/- {nstr(v.rad, 2)}")
+    print("  cusp:", r.is_cusp)
 
 @njit(cache=True)
 def _E_slopes_one(n, lnC, p, tol, f, k_lo):
