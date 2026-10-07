@@ -8,7 +8,7 @@ The core computational functions for the ordered binomial distribution, shared b
 ## Install
 
 ```bash
-pip install "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.3.1"
+pip install "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.3.2"
 ```
 
 For development, clone it and install editable: `pip install -e path/to/OBD-core`.

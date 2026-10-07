@@ -165,7 +165,14 @@ def _one_tie(n, lnC, i, j, f, w):
     lo_req = i if pair_in else md
     hi_req = j if pair_in else md
     lo, hi = _masses(n, lnC, md, lnp, lnq, rho, lo_req, hi_req, f)
-    f[j] = f[i]                                  # exact tie
+    if pair_in or i >= lo:
+        f[j] = f[i]                              # exact tie
+    else:
+        # The pair is below TINY and i fell outside the window, so f[i] was never written for this
+        # tie point: it holds whatever the reused buffer last held.  Copying it into a j inside the
+        # window corrupted E and S_- (n=978, pair (1,978), window [2,978]).  Both masses are below
+        # TINY, i.e. numerically zero, which is what f[j] must be.
+        f[j] = 0.0
     nz = lo + (n - hi)                           # masses outside the window: all exactly zero,
                                                  # so they take ranks 0..nz-1 as an equal block
     s = 0.0; comp = 0.0                          # Neumaier sum, then rescale

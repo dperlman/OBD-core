@@ -142,3 +142,19 @@ def test_E_slopes_at_ends_and_last_tie():
     assert E == pytest.approx([3.0, 2.25, 3.0], rel=1e-14)
     assert sl == pytest.approx([-3.0, 0.75, 3.0], rel=1e-12)   # (2,3) at 3/4: left 0.75,
     assert sr == pytest.approx([-3.0, 3.0, 3.0], rel=1e-12)    # right n (E = n p above it)
+
+
+def test_one_tie_does_not_read_unwritten_buffer():
+    # n=978, pair (1,978): the pair is below TINY and i=1 is just outside the mass window [2,978].
+    # The result must not depend on what the scratch buffer held before the call.
+    n = 978
+    lnC = core.lnC_arr(n)
+    results = set()
+    for fill in (0.0, 1.0, 1e300, -1e300, 7.5):
+        f = np.full(n + 1, fill)
+        w = np.zeros(n + 1, np.int64)
+        p, ln_fi, E, Sm, kappa, F3, tag_old, tag_new, rbnd = core._one_tie(n, lnC, 1, 978, f, w)
+        results.add((E, Sm, tag_new))
+    assert len(results) == 1
+    (E, Sm, tag), = results
+    assert abs(E - core.E_at(n, p)) < 1e-9
