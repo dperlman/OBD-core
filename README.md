@@ -8,7 +8,7 @@ The core computational functions for the ordered binomial distribution, shared b
 ## Install
 
 ```bash
-pip install "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.2.1"
+pip install "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.3.0"
 ```
 
 For development, clone it and install editable: `pip install -e path/to/OBD-core`.
@@ -23,5 +23,6 @@ p, E, F3, S_minus, S_plus, slope_left, slope_right = core.evaluate(100, 45, 56)
 
 `core.tie_table(n, both_halves=True)` returns every tie point of `n`, sorted by p*, with the
 certified cusp verdict, the exact one-sided slopes and `log10_D`, the log of the slope jump.
+`core.E_slopes_at(n, p_array)` gives E and the exact one-sided slopes at arbitrary p (for grids).
 
 Dependencies: numpy, numba, mpmath.  Tests: `pip install -e ".[test]"` then `pytest`.

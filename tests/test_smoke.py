@@ -115,3 +115,30 @@ def test_certify_exact_agrees_with_interval_arithmetic():
                 continue
             v, _ = core.certify_escalating(n, i, j)
             assert v is not None and core.certify_exact(n, i, j) == v, (n, i, j)
+
+
+def test_E_slopes_at_between_ties_matches_central_difference():
+    for n in (5, 50, 300):
+        for p in (0.13, 0.4321, 0.61, 0.87):
+            E, sl, sr = core.E_slopes_at(n, [p])
+            assert sl[0] == sr[0]
+            assert abs(E[0] - core.E_at(n, p)) < 1e-12 * n
+            h = 1e-7
+            fd = (core.E_at(n, p + h) - core.E_at(n, p - h)) / (2 * h)
+            assert abs(sl[0] - fd) < 1e-5 * max(1.0, abs(fd))
+
+
+def test_E_slopes_at_tie_points_match_the_kernel():
+    for n in (100, 1000):
+        t = core.tie_table(n)
+        E, sl, sr = core.E_slopes_at(n, t["pstar"])
+        assert np.allclose(sl, t["slope_left"], rtol=1e-9, atol=1e-9)
+        assert np.allclose(sr, t["slope_right"], rtol=1e-9, atol=1e-9)
+        assert np.allclose(E, t["E"], rtol=1e-13)
+
+
+def test_E_slopes_at_ends_and_last_tie():
+    E, sl, sr = core.E_slopes_at(3, [0.0, 0.75, 1.0])
+    assert E.tolist() == [3.0, 2.25, 3.0]
+    assert sl.tolist() == [-3.0, 0.75, 3.0]   # (2,3) at 3/4: left 0.75, right n (E = n p above it)
+    assert sr.tolist() == [-3.0, 3.0, 3.0]
