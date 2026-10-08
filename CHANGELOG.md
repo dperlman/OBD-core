@@ -16,6 +16,16 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
+## v0.6.1 (2026-10-08)
+
+- **Fix:** `tie_table` stored `n_tied_pairs` as int16, and the axis row holds n/2 pairs, so every
+  call with n ≥ 65,536 failed with an OverflowError. Now int32. No table was ever wrong: those n
+  simply could not be built. Found extending OBD's tie-point proximity plot to n = 100,000.
+- ordered-binomial-cusps' `dump_ties.py` now casts the column to its documented int16, so its
+  Parquet files are unchanged.
+- Numerically identical: rule 3 (cusps_fast n = 3–600, 1000, 1162, 2001, 3000; dump_ties at the
+  ten listed n) is byte-for-byte unchanged.
+
 ## v0.6.0 (2026-10-07)
 
 - `tie_table(n, p_range=(lo, hi))` and `screen(n, p_range=...)`: only the tie points with

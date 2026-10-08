@@ -794,7 +794,7 @@ def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair
                 F3=np.nan, tag=(TAG_MIN if aSm < 0 < aSp else 0))
     for k in r: r[k] = np.concatenate([np.array([axis[k]], dtype=r[k].dtype), r[k]])
     c = len(r['i'])
-    n_pairs = np.ones(c, np.int16); n_pairs[0] = apairs
+    n_pairs = np.ones(c, np.int32); n_pairs[0] = apairs   # the axis has n/2 pairs: int16 overflowed at n >= 65,536
     decided = np.array(['double']*c, dtype=object)
     decided[0] = 'symmetry'                # settled exactly by E(p) = E(1-p)
     is_cusp = r['tag'] == TAG_MIN

@@ -21,8 +21,8 @@ changed in each release: [CHANGELOG.md](CHANGELOG.md).
 ## Install
 
 ```bash
-pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.6.0/constraints.txt \
-    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.6.0"
+pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.6.1/constraints.txt \
+    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.6.1"
 ```
 
 The `-c constraints.txt` pins numpy, numba, llvmlite and mpmath to exact versions (see

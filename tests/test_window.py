@@ -114,3 +114,11 @@ def test_several_windows_in_one_call(both_halves):
     _assert_same({k: v[keep] for k, v in full.items()}, core.tie_table(n, both_halves=both_halves, p_range=wins))
     one = [(0.55, 0.6)]
     _assert_same(core.tie_table(n, p_range=(0.55, 0.6)), core.tie_table(n, p_range=one))
+
+
+def test_tie_table_past_int16():
+    """The axis row counts n/2 tied pairs, which overflowed int16 from n = 65,536 (found 2026-10-08)."""
+    n = 70000
+    t = core.tie_table(n, p_range=[(0.5, 0.5), (1 - 1e-4, 1.0)])
+    assert t["n_tied_pairs"][0] == n // 2 and t["n_tied_pairs"].dtype == np.int32
+    assert t["pstar"][-1] == pytest.approx(n / (n + 1), abs=1e-12)          # the last tie point, (n-1, n)
