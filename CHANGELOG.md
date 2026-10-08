@@ -4,6 +4,18 @@ Each release is a git tag; consumers install a tag (see the README). Only notabl
 listed. "Numerically identical" means the fast code's output is byte-for-byte unchanged (checked
 against ordered-binomial-cusps' tables and dumps).
 
+## Known problems in older releases
+
+**Use v0.3.2 or later.** Every release before it can return wrong numbers:
+
+| releases | problem | fixed in |
+|---|---|---|
+| v0.1.0 – v0.3.1 | **Buffer bug.** `_one_tie` could copy a never-written buffer entry into the mass window, giving a tie point junk E, S₋ and slopes. It affects rare tie points (16 for n ≤ 1000, about 1300 per n at n = 5000) and only when the reused buffer happens to hold a non-zero value there, so it is silent and memory-dependent. Cusp verdicts are never affected. The bug predates this repository: it was in `binom_core.py` since the TINY window was added (2026-09-21). | v0.3.2 |
+| v0.3.0 | `E_slopes_at` wrong at thousands of tie points at n = 1000 | v0.3.1 |
+| v0.1.0 – v0.2.0 | n = 2's tie point, where S₋ is exactly 0, is left `UNRESOLVED` (reported as not a cusp, which is correct, but unproved) | v0.2.1 |
+
+The tags are kept because published tags are not rewritten. Nothing pins any of them.
+
 ## v0.5.0 (2026-10-07)
 
 - `reference.check_invariants(n, table)`: bounds that follow from the definitions, checked on
@@ -40,6 +52,8 @@ against ordered-binomial-cusps' tables and dumps).
 
 ## v0.3.2 (2026-10-06)
 
+The first release with no known problems.
+
 - **Fix:** `_one_tie` could copy a never-written buffer entry into the mass window. This
   happened when a tie pair is below `TINY` and i falls outside the window while j falls inside.
   It corrupted E and S₋ of that row (e.g. n = 978, pair (1, 978): E = 492 instead of 953.54).
@@ -47,7 +61,7 @@ against ordered-binomial-cusps' tables and dumps).
   16 tie points for n ≤ 1000 and about 1300 per n at n = 5000. ordered-binomial-cusps' existing
   tables and dumps were checked and were unaffected.
 
-## v0.3.1 (2026-10-06)
+## v0.3.1 (2026-10-06): do not use (buffer bug, see above)
 
 - **Fix:** `E_slopes_at` (new in v0.3.0) was wrong at thousands of tie points at n = 1000. A
   fixed 1e-9 tie tolerance merged distinct tie points that sit about 1e-12 apart, and its masses
@@ -56,22 +70,22 @@ against ordered-binomial-cusps' tables and dumps).
 - `_masses()`: the mass construction, extracted from `_one_tie` so both share it. Numerically
   identical.
 
-## v0.3.0 (2026-10-06): do not use
+## v0.3.0 (2026-10-06): do not use (buffer bug, and `E_slopes_at` wrong)
 
 - Added `E_slopes_at`, E and the exact one-sided slopes at arbitrary p, **with a bug fixed in
-  v0.3.1**. The tag is kept, because published tags are not rewritten, but nothing pins it.
+  v0.3.1**.
 
-## v0.2.1 (2026-10-05)
+## v0.2.1 (2026-10-05): do not use (buffer bug, see above)
 
 - `certify_exact()`: an exact integer verdict for adjacent pairs, as `tie_table`'s last resort.
   It settles n = 2's tie point, where S₋ is exactly 0, which interval arithmetic cannot.
 
-## v0.2.0 (2026-10-05)
+## v0.2.0 (2026-10-05): do not use (buffer bug, see above)
 
 - `tie_table(n, both_halves=False)`: every tie point of n, certified, with exact slopes and
   log₁₀ D; `both_halves=True` adds the p < ½ mirror half.
 
-## v0.1.0 (2026-10-05)
+## v0.1.0 (2026-10-05): do not use (buffer bug, see above)
 
 - First release: `binom_core.py` from ordered-binomial-cusps, moved here with its history and
   renamed `obd_core.py`.
