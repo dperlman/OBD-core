@@ -8,6 +8,7 @@ README.md at https://github.com/dperlman/OBD-core (rules for changing the packag
 Start here
     tie_table(n, both_halves=False)  every tie point of n: p*, E, exact slopes, log10_D, proved
                                      cusp verdict (dict of numpy arrays; row 0 = the axis p=1/2)
+    tie_table(n, p_range=(lo, hi))   only the tie points with lo <= p* <= hi, same rows bit for bit
     E_slopes_at(n, p_array)          E and the exact one-sided slopes at any p (grids)
     E_at(n, p), E_half(n)            E at one p / at 1/2
     evaluate(n, i, j)                one tie point in double precision
@@ -199,6 +200,16 @@ def _masses(n, lnC, md, lnp, lnq, rho, lo_req, hi_req, f):
     return lo, hi
 
 @njit(cache=True)
+def _pstar(lnC, i, j):
+    """The tie point p* of the pair (i, j): (p*/q*)^(j-i) = C(n,i)/C(n,j).  Returns (p*, ln rho).
+
+    The ONLY place p* is computed: _one_tie and the windowed search (window_kernel) both call it,
+    so a window test and the table it selects agree to the last bit.
+    """
+    lnrho = (lnC[i] - lnC[j]) / (j - i)
+    return 1.0/(1.0 + np.exp(-lnrho)), lnrho
+
+@njit(cache=True)
 def _one_tie(n, lnC, i, j, f, w):
     """All quantities for a single tie point.  The masses come from _masses, the one place they are built.
 
@@ -210,8 +221,8 @@ def _one_tie(n, lnC, i, j, f, w):
     f and w are scratch buffers of length n+1, passed in so a loop can reuse them.
     """
     m = j - i
-    lnrho = (lnC[i] - lnC[j]) / m
-    p = 1.0/(1.0 + np.exp(-lnrho)); q = 1.0 - p; rho = p/q
+    p, lnrho = _pstar(lnC, i, j)
+    q = 1.0 - p; rho = p/q
     lnp = np.log(p); lnq = np.log(q)
     md = int(np.floor((n+1)*p))                  # mode of Bin(n,p)
     if md > n: md = n
@@ -348,6 +359,67 @@ def tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp,
                 cnt += 1
     return cnt
 
+@njit(cache=True)
+def _first_i(lnC, m, a, b, p_lo, strict):
+    """Smallest i in [a, b] with p*(i, i+m) >= p_lo (> p_lo if strict), or b+1.  p*(i, i+m) is
+    strictly increasing in i: (p*/q*)^m = prod_{t=i+1}^{i+m} t/(n+1-t), every factor increasing."""
+    while a <= b:
+        c = (a + b) // 2
+        p = _pstar(lnC, c, c + m)[0]
+        if p > p_lo or (p == p_lo and not strict): b = c - 1
+        else: a = c + 1
+    return a
+
+@njit(cache=True)
+def window_kernel(n, lnC, collect_all, p_lo, p_hi, min_ln_fi, sharp,
+                  out_i, out_j, out_p, out_lnf, out_E, out_Sm, out_F3, out_tag,
+                  out_tag2, out_rbnd):
+    """tie_kernel restricted to the tie points with p_lo <= p* <= p_hi (p* > 1/2 as always).
+
+    For each width m = j - i, p* is increasing in i, so a binary search on the kernel's own p*
+    (_pstar) finds exactly the pairs in the window; each goes through _one_tie unchanged, so every
+    row is bit-identical to tie_kernel's.  Cost: O(n log n) for the search plus _one_tie on the
+    pairs found, about n^2 (p_hi - p_lo) of them, instead of all n^2/4.
+    min_ln_fi > -inf also skips pairs whose (unnormalised) ln f(i) at p* is below it, without
+    computing them: see screen().  Rows come out by width, then i.
+    """
+    cap = out_i.shape[0]
+    f = np.empty(n+1); w = np.empty(n+1, np.int64); cnt = 0
+    for m in range(1, n):
+        a = (n - m)//2 + 1                           # i + j > n, i.e. 2i + m > n
+        b = n - m                                    # j <= n
+        if a < 1: a = 1
+        if a > b: continue
+        lo = _first_i(lnC, m, a, b, p_lo, False)
+        hi = _first_i(lnC, m, a, b, p_hi, True) - 1
+        for i in range(lo, hi + 1):
+            j = i + m
+            if min_ln_fi > -np.inf:
+                p = _pstar(lnC, i, j)[0]
+                if lnC[i] + i*np.log(p) + (n-i)*np.log(1.0 - p) < min_ln_fi: continue
+            p, ln_fi, E, Sm, kappa, F3, tag_old, tag_new, rbnd = _one_tie(n, lnC, i, j, f, w)
+            tag = tag_new if sharp else tag_old
+            if collect_all or tag != TAG_NOT:
+                if cnt < cap:
+                    out_i[cnt] = i; out_j[cnt] = j; out_p[cnt] = p; out_lnf[cnt] = ln_fi
+                    out_E[cnt] = E; out_Sm[cnt] = Sm; out_F3[cnt] = F3; out_tag[cnt] = tag
+                    out_tag2[cnt] = tag_old if sharp else tag_new
+                    out_rbnd[cnt] = rbnd
+                cnt += 1
+    return cnt
+
+@njit(cache=True)
+def window_count(n, lnC, p_lo, p_hi):
+    """Number of tie points with p_lo <= p* <= p_hi (p* > 1/2), from the binary searches alone."""
+    c = 0
+    for m in range(1, n):
+        a = (n - m)//2 + 1
+        b = n - m
+        if a < 1: a = 1
+        if a > b: continue
+        c += _first_i(lnC, m, a, b, p_hi, True) - _first_i(lnC, m, a, b, p_lo, False)
+    return c
+
 def ties_in_range(n, i_lo, i_hi):
     return sum(max(0, n - max(i+1, n-i+1) + 1) for i in range(i_lo, i_hi))
 
@@ -363,8 +435,20 @@ def work_chunks(n, parts):
     if lo < n: out.append((lo, n))
     return [(a, b) for a, b in out if ties_in_range(n, a, b) > 0]
 
-def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=True):
+def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=True, p_range=None,
+           min_pair_mass=None):
     """tie_kernel with buffer management.  Returns a dict of numpy arrays.
+
+    p_range=(p_lo, p_hi) screens only the tie points with p_lo <= p* <= p_hi, through window_kernel
+    (i_lo/i_hi do not apply).  The rows are exactly tie_kernel's for those pairs, bit for bit, in
+    another order (by width, then i).
+    min_pair_mass (with p_range only) also skips every pair whose mass f(i) at p* is below it.
+    That is a SPEED-UP, NOT A PROOF: a cusp needs S_- < 0 < S_- + (j-i) f(i), so a tiny pair mass
+    makes a cusp very unlikely but not impossible, and no lower bound on the pair mass of a cusp is
+    proved.  Measured: the smallest pair mass at any cusp of n <= 5000 is 4.4e-9 (n = 4000..5000),
+    so 1e-20 leaves a wide margin there; it skips ~80% of pairs at n = 5000 and ~90% at 20,000.
+    Tables built with it may miss cusps in principle.  The test uses the unnormalised mass
+    (normalisation shifts ln f(i) by ~1e-12).
 
     sharp picks the CHECK trigger (see tie_kernel); it DEFAULTS TO THE SHARPENED ONE.  The
     returned dict always carries both verdicts: 'tag' from the selected rule and 'tag_alt' from the
@@ -373,15 +457,25 @@ def screen(n, collect_all=False, lnC=None, i_lo=1, i_hi=None, sharp=True):
     """
     lnC = lnC_arr(n) if lnC is None else lnC
     i_hi = n if i_hi is None else i_hi
-    cap = ties_in_range(n, i_lo, i_hi) if collect_all else max(64, 4*n)
+    if min_pair_mass is not None and p_range is None:
+        raise ValueError("min_pair_mass applies only with p_range")
+    if p_range is not None:
+        p_lo, p_hi = float(p_range[0]), float(p_range[1])
+        min_ln_fi = -np.inf if min_pair_mass is None else float(np.log(min_pair_mass))
+        cap = window_count(n, lnC, p_lo, p_hi) if collect_all else max(64, 4*n)
+    else:
+        cap = ties_in_range(n, i_lo, i_hi) if collect_all else max(64, 4*n)
     while True:
         a = dict(i=np.empty(cap, np.int64), j=np.empty(cap, np.int64), pstar=np.empty(cap),
                  ln_fi=np.empty(cap), E=np.empty(cap), S_minus=np.empty(cap),
                  F3=np.empty(cap), tag=np.empty(cap, np.int64),
                  tag_alt=np.empty(cap, np.int64), rbnd=np.empty(cap))
-        c = tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp,
-                       a['i'], a['j'], a['pstar'], a['ln_fi'], a['E'], a['S_minus'], a['F3'],
-                       a['tag'], a['tag_alt'], a['rbnd'])
+        outs = (a['i'], a['j'], a['pstar'], a['ln_fi'], a['E'], a['S_minus'], a['F3'],
+                a['tag'], a['tag_alt'], a['rbnd'])
+        if p_range is not None:
+            c = window_kernel(n, lnC, collect_all, p_lo, p_hi, min_ln_fi, sharp, *outs)
+        else:
+            c = tie_kernel(n, lnC, collect_all, i_lo, i_hi, sharp, *outs)
         if c <= cap: break
         cap = 2*c
     return {k: v[:c] for k, v in a.items()}
@@ -621,7 +715,7 @@ def _certify_one(a):
         how = 'exact' if v else 'UNRESOLVED'
     return (v == 'MIN'), how
 
-def tie_table(n, both_halves=False, workers=1, pool=None):
+def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair_mass=None):
     """Every tie point of n, sorted by p*, with certified cusp verdicts and exact slopes.
 
     Returns a dict of equal-length numpy arrays:
@@ -649,14 +743,36 @@ def tie_table(n, both_halves=False, workers=1, pool=None):
 
     pool (a multiprocessing.Pool) with workers > 1 splits the screen into work-balanced i-chunks and
     distributes the certifications; the result is identical however it is cut.
+
+    p_range=(p_lo, p_hi): only the rows with p_lo <= p* <= p_hi (with both_halves, on either side
+    of 1/2; the axis row only if 1/2 is in range).  Exactly the full table's rows there, bit for
+    bit and in the same order, but only those tie points are computed (screen's p_range), so a
+    narrow window costs a small fraction of the full table: about n^2 (p_hi - p_lo) tie points
+    instead of n^2/4.  The pool then serves only the certifications.
+    min_pair_mass (with p_range): skip pairs with f(i) below it, uncomputed.  A speed-up that is
+    NOT proved safe for cusps: see screen().
     """
-    if pool is not None and workers > 1:
-        parts = pool.map(_screen_chunk, [(n, a, b) for a, b in work_chunks(n, workers)])
-        r = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    if min_pair_mass is not None and p_range is None:
+        raise ValueError("min_pair_mass applies only with p_range")
+    if p_range is not None:
+        lo, hi = float(p_range[0]), float(p_range[1])
+        # The p* > 1/2 tie points needed: the window above 1/2, and the mirror of the part below.
+        need = []
+        if hi >= 0.5: need.append((max(lo, 0.5), hi))
+        if both_halves and lo <= 0.5: need.append((1.0 - min(hi, 0.5), 1.0 - lo))
+        up = (min(a for a, _ in need), max(b for _, b in need)) if need else (2.0, 2.0)
+        r = screen(n, collect_all=True, p_range=up, min_pair_mass=min_pair_mass)
+        for k in ('tag_alt', 'rbnd'): r.pop(k, None)
+        # tie_kernel emits i-major, j-minor, and the full table sorts that stably by p*; same order:
+        o = np.lexsort((r['j'], r['i'], r['pstar']))
     else:
-        r = screen(n, collect_all=True)
-    for k in ('tag_alt', 'rbnd'): r.pop(k, None)   # trigger diagnostics
-    o = np.argsort(r['pstar'], kind='stable')
+        if pool is not None and workers > 1:
+            parts = pool.map(_screen_chunk, [(n, a, b) for a, b in work_chunks(n, workers)])
+            r = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+        else:
+            r = screen(n, collect_all=True)
+        for k in ('tag_alt', 'rbnd'): r.pop(k, None)   # trigger diagnostics
+        o = np.argsort(r['pstar'], kind='stable')
     r = {k: v[o] for k, v in r.items()}
     aSm, aSp, aE, akap, apairs = axis_point(n)
     axis = dict(i=0, j=n, pstar=0.5, ln_fi=np.log(akap/n), E=aE, S_minus=aSm,
@@ -680,12 +796,15 @@ def tie_table(n, both_halves=False, workers=1, pool=None):
     r['log10_D'] = ln_D/np.log(10.0)
     r['slope_right'] = r['slope_left'] + np.exp(ln_D)
     r['slope_right'][0] = aSp/pq[0]                    # exact at the axis: E'_+ = -E'_-
-    if not both_halves:
-        return r
-    m = {k: v[:0:-1] for k, v in r.items()}           # rows 1..c-1, reversed: p* descending
-    m['i'], m['j'] = n - r['j'][:0:-1], n - r['i'][:0:-1]
-    m['pstar'] = 1 - r['pstar'][:0:-1]
-    m['slope_left'], m['slope_right'] = -r['slope_right'][:0:-1], -r['slope_left'][:0:-1]
-    m['S_minus'] = m['slope_left']*(m['pstar']*(1 - m['pstar']))
-    m['F3'] = np.full(c - 1, np.nan)
-    return {k: np.concatenate([m[k], r[k]]) for k in r}
+    if both_halves:
+        m = {k: v[:0:-1] for k, v in r.items()}       # rows 1..c-1, reversed: p* descending
+        m['i'], m['j'] = n - r['j'][:0:-1], n - r['i'][:0:-1]
+        m['pstar'] = 1 - r['pstar'][:0:-1]
+        m['slope_left'], m['slope_right'] = -r['slope_right'][:0:-1], -r['slope_left'][:0:-1]
+        m['S_minus'] = m['slope_left']*(m['pstar']*(1 - m['pstar']))
+        m['F3'] = np.full(c - 1, np.nan)
+        r = {k: np.concatenate([m[k], r[k]]) for k in r}
+    if p_range is not None:
+        keep = (r['pstar'] >= lo) & (r['pstar'] <= hi)
+        r = {k: v[keep] for k, v in r.items()}
+    return r

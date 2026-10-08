@@ -17,15 +17,17 @@ updated in the same piece of work.
 ## Rules
 
 1. **One implementation.** The fast mathematics exists once, here. `_masses` is the only place
-   masses are built; `_one_tie` is the only place a tie point's quantities are computed;
-   `tie_table` is the only bulk table builder. Do not add a second way to compute any of them in
+   masses are built; `_pstar` the only place p* is computed; `_one_tie` the only place a tie
+   point's quantities are computed; `tie_table` is the only bulk table builder (`p_range`
+   restricts it to a p window through `window_kernel`, and must stay bit-identical to the full
+   table's rows there: `tests/test_window.py`). Do not add a second way to compute any of them in
    this file or in a consumer: extend the existing function.
 2. **The reference stays independent.** `obd_core/reference.py` must not import anything from
    `obd_core` (`tests/test_reference.py` enforces this). Its value is that it shares no code with
    the fast kernel, so a bug cannot hide in both. Keep it exact or interval-rigorous: never
    return a plain float as if it were certified.
 3. **Kernel changes must be shown harmless, byte for byte.** After any change to `obd_core/__init__.py`
-   that the certified pipeline uses (`_masses`, `_one_tie`, `_err_bounds`, `tie_kernel`, `screen`,
+   that the certified pipeline uses (`_masses`, `_pstar`, `_one_tie`, `_err_bounds`, `tie_kernel`, `screen`,
    `certify*`, `axis_point`, `tie_table`), in the cusps repo:
    ```bash
    cd ~/git/ordered-binomial-cusps

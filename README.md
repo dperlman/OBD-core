@@ -21,8 +21,8 @@ changed in each release: [CHANGELOG.md](CHANGELOG.md).
 ## Install
 
 ```bash
-pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.5.0/constraints.txt \
-    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.5.0"
+pip install -c https://raw.githubusercontent.com/dperlman/OBD-core/v0.6.0/constraints.txt \
+    "obd-core @ git+https://github.com/dperlman/OBD-core.git@v0.6.0"
 ```
 
 The `-c constraints.txt` pins numpy, numba, llvmlite and mpmath to exact versions (see
@@ -53,18 +53,20 @@ import obd_core as core
 
 t = core.tie_table(1000, both_halves=True)   # every tie point of n = 1000, sorted by p*
 t["pstar"], t["slope_left"], t["log10_D"], t["is_cusp"]
+w = core.tie_table(20000, p_range=(0.6, 0.600002))   # only the tie points in a p window: 0.08 s
 E, sl, sr = core.E_slopes_at(1000, np.linspace(0, 1, 1001))   # E and slopes on any grid
 ```
 
 | function | returns | notes |
 |---|---|---|
-| `tie_table(n, both_halves=False, workers=1, pool=None)` | dict of arrays, one row per tie point, sorted by p\* | **The main entry point.** Columns: `i, j, pstar, ln_fi, E, S_minus, F3, tag, n_tied_pairs, is_cusp, decided_by, slope_left, slope_right, log10_D`. Row 0 of the p\* > ½ half is the axis (sentinel pair (0, n), `decided_by="symmetry"`). `both_halves=True` adds the p\* < ½ mirror rows (F3 = NaN there). Pass a `multiprocessing.Pool` and `workers>1` to parallelise; the result is identical. |
+| `tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair_mass=None)` | dict of arrays, one row per tie point, sorted by p\* | **The main entry point.** Columns: `i, j, pstar, ln_fi, E, S_minus, F3, tag, n_tied_pairs, is_cusp, decided_by, slope_left, slope_right, log10_D`. Row 0 of the p\* > ½ half is the axis (sentinel pair (0, n), `decided_by="symmetry"`). `both_halves=True` adds the p\* < ½ mirror rows (F3 = NaN there). Pass a `multiprocessing.Pool` and `workers>1` to parallelise; the result is identical. `p_range=(lo, hi)` computes only the tie points with lo ≤ p\* ≤ hi: exactly the full table's rows there, bit for bit, at a cost of about n²(hi − lo) tie points instead of n²/4. `min_pair_mass` (with `p_range`) also skips pairs whose mass f(i) is below it: faster, but **not proved** to keep every cusp (see Pitfalls). |
 | `E_slopes_at(n, p_array)` | `(E, slope_left, slope_right)` arrays | E and the exact one-sided slopes at arbitrary p. Equal except at tie points. At p = 0 and 1: E = n, slopes −n / +n. |
 | `E_at(n, p)` | float | E at one p (sort-based). |
 | `E_half(n)` | float | E(n, ½). |
 | `evaluate(n, i, j)` | `(p*, E, F3, S_-, S_+, slope_left, slope_right)` | One tie point, double precision. |
 | `axis_point(n)` | `(S_-, S_+, E, kappa, n_pairs)` | The p = ½ tie point. |
-| `screen(n, collect_all=False)` | dict of arrays | The raw screening kernel (p\* > ½, no axis row, CHECK rows not yet certified). Prefer `tie_table`. |
+| `screen(n, collect_all=False, p_range=None, min_pair_mass=None)` | dict of arrays | The raw screening kernel (p\* > ½, no axis row, CHECK rows not yet certified). Prefer `tie_table`. |
+| `window_count(n, lnC_arr(n), lo, hi)` | int | Number of tie points with lo ≤ p\* ≤ hi (p\* > ½), from binary searches alone. |
 | `certify(n, i, j, dps)` / `certify_escalating(n, i, j)` / `certify_exact(n, i, j)` | `'MIN'`/`'NOT'`/`None`, plus the route | Proved cusp verdict for one tie point: interval arithmetic, or exact integers for adjacent pairs. `tie_table` already calls these for every borderline row. |
 | `recheck(n, i, j, dps=50)` | prints | Every quantity at one tie point, from `reference.tie`. |
 | `n_ties(n)`, `lnC_arr(n)` | int, array | Number of tie points with p\* > ½ (excluding the axis); log C(n,k). |
@@ -93,6 +95,10 @@ screen margin on S₋, S₊), `TAG_MIN`, `TAG_NOT`, `TAG_CHECK`. Names starting 
   (j−i)·exp(ln_fi) is the whole kink, and `F3` is NaN.
 - **Masses below `TINY`** contribute exactly 0. A tie point whose pair mass is below it can never
   be a cusp.
+- **`min_pair_mass` is a heuristic.** A cusp needs S₋ < 0 < S₋ + (j−i)·f(i), so a light pair is very
+  unlikely to be one, but no lower bound on a cusp's pair mass is proved. Measured: the lightest
+  cusp pair for n ≤ 5000 has f(i) = 4.4e-9; with 1e-20, 150 random windows at n = 1001–5000 found
+  every one of the 2,958 catalogued cusps in them. Without `min_pair_mass` a window is complete.
 - **Floats near a tie point:** `E_slopes_at` treats masses within ~64·eps·(n+1)/(pq) of each other
   as tied. Distinct tie points can sit about 1e-12 apart at n = 1000, so a looser tolerance would
   report kinks that are not there.

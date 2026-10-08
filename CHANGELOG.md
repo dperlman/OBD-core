@@ -16,6 +16,24 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
+## v0.6.0 (2026-10-07)
+
+- `tie_table(n, p_range=(lo, hi))` and `screen(n, p_range=...)`: only the tie points with
+  lo ≤ p\* ≤ hi. For each width m = j − i, p\* increases with i, so binary searches on the
+  kernel's own p\* find exactly the pairs in the window, and only those go through `_one_tie`.
+  The result is the full table's rows in the window, bit for bit and in the same order (tested
+  for n ≤ 300 on many windows, both halves, and at n = 1162 through interval certification).
+  Cost: about n²(hi − lo) tie points instead of n²/4, so n = 20,000 in a window of width 2e-6
+  takes 0.08 s. For "first n with a cusp near p" searches far past the full tables.
+- `min_pair_mass` (with `p_range`): skip pairs whose mass f(i) at p\* is below it, uncomputed.
+  About 5× faster in the band; **not proved** safe for cusps (see the README's Pitfalls). With
+  1e-20, 150 random windows at n = 1001–5000 found exactly ordered-binomial-cusps' catalogued
+  cusps, as did the windows without it.
+- `window_count(n, lnC, lo, hi)`: the number of tie points in a window.
+- `_pstar(lnC, i, j)`: p\* now has one implementation, used by `_one_tie` and the window search.
+- Numerically identical: rule 3's comparison (cusps_fast n = 3–600, 1000, 1162, 2001, 3000;
+  dump_ties at the ten listed n) is byte-for-byte unchanged.
+
 ## v0.5.0 (2026-10-07)
 
 - `reference.check_invariants(n, table)`: bounds that follow from the definitions, checked on
