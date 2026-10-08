@@ -21,8 +21,8 @@ The tags are kept because published tags are not rewritten. Nothing pins any of 
 - `reference.check_invariants(n, table)`: bounds that follow from the definitions, checked on
   **every** row in milliseconds: 0 ≤ E ≤ n, p increasing, slope_right ≥ slope_left, log₁₀ D finite,
   |E′| ≤ n^1.5/(2√(pq)), and E Lipschitz between neighbouring tie points. Unlike a sampled
-  reference comparison, it catches a single corrupt row; it flags the v0.3.1 n = 978 corruption
-  at that row.
+  reference comparison, it catches a single corrupt row; it flags the buffer bug's n = 978
+  corruption (seen in a v0.2.1 run) at that row.
 - Tests: the kernel against the reference on 50 rows at n = 1000; invariants on every row for
   several n, and on an injected copy of the n = 978 corruption.
 - CI (GitHub Actions): the test suite on Linux and macOS (Apple Silicon) with the pinned stack,
