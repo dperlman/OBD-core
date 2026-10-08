@@ -715,6 +715,12 @@ def _certify_one(a):
         how = 'exact' if v else 'UNRESOLVED'
     return (v == 'MIN'), how
 
+def _as_windows(p_range):
+    """p_range as a list of (lo, hi): one pair, or a sequence of pairs."""
+    if len(p_range) == 2 and np.ndim(p_range[0]) == 0:
+        return [(float(p_range[0]), float(p_range[1]))]
+    return [(float(a), float(b)) for a, b in p_range]
+
 def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair_mass=None):
     """Every tie point of n, sorted by p*, with certified cusp verdicts and exact slopes.
 
@@ -744,8 +750,9 @@ def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair
     pool (a multiprocessing.Pool) with workers > 1 splits the screen into work-balanced i-chunks and
     distributes the certifications; the result is identical however it is cut.
 
-    p_range=(p_lo, p_hi): only the rows with p_lo <= p* <= p_hi (with both_halves, on either side
-    of 1/2; the axis row only if 1/2 is in range).  Exactly the full table's rows there, bit for
+    p_range=(p_lo, p_hi), or a list of such windows: only the rows with p* in a window (with
+    both_halves, on either side of 1/2; the axis row only if 1/2 is in one).  Many windows in one
+    call share the per-n setup (log binomials, the axis), which dominates for narrow windows.  Exactly the full table's rows there, bit for
     bit and in the same order, but only those tie points are computed (screen's p_range), so a
     narrow window costs a small fraction of the full table: about n^2 (p_hi - p_lo) tie points
     instead of n^2/4.  The pool then serves only the certifications.
@@ -755,13 +762,21 @@ def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair
     if min_pair_mass is not None and p_range is None:
         raise ValueError("min_pair_mass applies only with p_range")
     if p_range is not None:
-        lo, hi = float(p_range[0]), float(p_range[1])
-        # The p* > 1/2 tie points needed: the window above 1/2, and the mirror of the part below.
+        wins = _as_windows(p_range)
+        # The p* > 1/2 tie points needed: each window above 1/2, and the mirror of its part below;
+        # merged so that no pair is screened twice.
         need = []
-        if hi >= 0.5: need.append((max(lo, 0.5), hi))
-        if both_halves and lo <= 0.5: need.append((1.0 - min(hi, 0.5), 1.0 - lo))
-        up = (min(a for a, _ in need), max(b for _, b in need)) if need else (2.0, 2.0)
-        r = screen(n, collect_all=True, p_range=up, min_pair_mass=min_pair_mass)
+        for lo, hi in wins:
+            if hi >= 0.5: need.append((max(lo, 0.5), hi))
+            if both_halves and lo <= 0.5: need.append((1.0 - min(hi, 0.5), 1.0 - lo))
+        merged = []
+        for a, b in sorted(need):
+            if merged and a <= merged[-1][1]: merged[-1][1] = max(merged[-1][1], b)
+            else: merged.append([a, b])
+        lnC = lnC_arr(n)                                # once for every window
+        parts = [screen(n, collect_all=True, lnC=lnC, p_range=(a, b), min_pair_mass=min_pair_mass)
+                 for a, b in (merged or [[2.0, 2.0]])]
+        r = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
         for k in ('tag_alt', 'rbnd'): r.pop(k, None)
         # tie_kernel emits i-major, j-minor, and the full table sorts that stably by p*; same order:
         o = np.lexsort((r['j'], r['i'], r['pstar']))
@@ -805,6 +820,8 @@ def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair
         m['F3'] = np.full(c - 1, np.nan)
         r = {k: np.concatenate([m[k], r[k]]) for k in r}
     if p_range is not None:
-        keep = (r['pstar'] >= lo) & (r['pstar'] <= hi)
+        keep = np.zeros(len(r['pstar']), bool)
+        for lo, hi in wins:
+            keep |= (r['pstar'] >= lo) & (r['pstar'] <= hi)
         r = {k: v[keep] for k, v in r.items()}
     return r

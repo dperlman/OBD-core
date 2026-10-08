@@ -100,3 +100,17 @@ def test_window_at_large_n_against_the_reference():
     assert ref.check_invariants(n, w)["ok"]
     c = ref.check_tie_table(n, w, sample=3, seed=1)
     assert c["verdicts_ok"] and c["within_expected"]
+
+
+@pytest.mark.parametrize("both_halves", [False, True])
+def test_several_windows_in_one_call(both_halves):
+    """A list of windows (overlapping, unsorted, across 1/2) gives the rows of their union."""
+    n = 300
+    full = core.tie_table(n, both_halves=both_halves)
+    wins = [(0.62, 0.64), (0.55, 0.56), (0.555, 0.57), (0.45, 0.52), (0.9, 0.9001), (0.1, 0.12)]
+    keep = np.zeros(len(full["pstar"]), bool)
+    for lo, hi in wins:
+        keep |= (full["pstar"] >= lo) & (full["pstar"] <= hi)
+    _assert_same({k: v[keep] for k, v in full.items()}, core.tie_table(n, both_halves=both_halves, p_range=wins))
+    one = [(0.55, 0.6)]
+    _assert_same(core.tie_table(n, p_range=(0.55, 0.6)), core.tie_table(n, p_range=one))

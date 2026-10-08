@@ -24,7 +24,9 @@ The tags are kept because published tags are not rewritten. Nothing pins any of 
   The result is the full table's rows in the window, bit for bit and in the same order (tested
   for n ≤ 300 on many windows, both halves, and at n = 1162 through interval certification).
   Cost: about n²(hi − lo) tie points instead of n²/4, so n = 20,000 in a window of width 2e-6
-  takes 0.08 s. For "first n with a cusp near p" searches far past the full tables.
+  takes 0.08 s. `p_range` may also be a list of windows: one call shares the per-n setup (the
+  log binomials and the axis), which otherwise dominates narrow windows. For "first n with a
+  cusp near p" searches far past the full tables.
 - `min_pair_mass` (with `p_range`): skip pairs whose mass f(i) at p\* is below it, uncomputed.
   About 5× faster in the band; **not proved** safe for cusps (see the README's Pitfalls). With
   1e-20, 150 random windows at n = 1001–5000 found exactly ordered-binomial-cusps' catalogued
