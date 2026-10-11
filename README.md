@@ -157,6 +157,38 @@ or None if the enclosure straddles 0), `.contains(x)`, `.abs_err(x)`, `.rel_err(
 an arbitrary float p at n = 1000 (exact, big integers). Use it on single points or samples,
 never to build tables.
 
+## `obd_core.store`: computed once, read back
+
+Certified tie tables and cusp tables kept on disk and shared by every consumer, so nothing is
+computed twice. Needs pyarrow (`pip install "obd-core[store]"`). The data lives in `$OBD_DATA`, or
+`~/obd-data`, outside every repository.
+
+```python
+from obd_core import store
+s = store.Store()
+t = s.ties(4000)                            # tie_table(4000): read it, or compute and save it
+w = s.ties(20000, p_range=(0.6, 0.6002))     # a window: only what is not yet stored is computed
+c = s.cusps(4321)                           # the rows with is_cusp; the full table is not kept
+s.check("ties", ns=[1000, 4000])            # recompute and compare bit for bit; logged in STORE.json
+```
+
+- **Exactly `tie_table`.** A request returns what `tie_table(n, p_range=...)` returns, row for row
+  and bit for bit, same columns and dtypes (`tests/test_store.py`). The store computes nothing
+  itself: every value comes from `tie_table`. Tables cover p\* ≥ ½, as `tie_table` does.
+- **Coverage.** Each n records which p intervals are complete and in which part files. A request
+  computes only the uncovered gaps, with `tie_table(n, p_range=gaps)`, and saves them. Parts searched
+  with `min_pair_mass` count as complete only for requests that accept that threshold.
+- **`ties` saves the full table; `cusps` saves only the cusps** unless `save_ties=True` (a full
+  table is n²/4 rows, about 1 GB at n = 8000). `cusps` reads stored tie tables when they cover the
+  range.
+- **The numeric epoch.** `obd_core.NUMERIC_EPOCH` changes only when some output of this package
+  changes. Every part records the epoch it was computed under, and a part from another epoch is
+  refused with `store.StaleData`. `Store.check` recomputes stored n, compares them bit for bit,
+  spot-checks rows against `reference`, re-stamps parts that still agree, and records the result in
+  `STORE.json`.
+- **Interruption-safe.** Parts are written under a temporary name and renamed; coverage is updated
+  only after its part is in place. One process at a time should write a given n.
+
 ## Recipes
 
 - **A value looks wrong.** Run `ref.tie(n, i, j)` (or `obd_core.recheck(n, i, j)` to print it)

@@ -12,7 +12,8 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "numba", "mpmath"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pyarrow"]
+store = ["pyarrow"]
 
 [project.urls]
 Repository = "https://github.com/dperlman/OBD-core"

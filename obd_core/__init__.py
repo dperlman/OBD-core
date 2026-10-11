@@ -84,6 +84,12 @@ from numba import njit
 # byte agreement between environments is no longer guaranteed.
 NUMERIC_PINS = {"numpy": "2.3.5", "numba": "0.63.1", "llvmlite": "0.46.0", "mpmath": "1.4.0"}
 
+# The numeric epoch: changes only when some output of this package changes (decided by CLAUDE.md,
+# rule 3).  Stored results (obd_core.store) record the epoch they were computed under and are refused
+# under any other.  Epoch 1 is v0.6.1 (n_tied_pairs int32); releases that keep every output bit for
+# bit keep the epoch.
+NUMERIC_EPOCH = 1
+
 def pin_mismatches():
     """{package: installed version} for every NUMERIC_PINS entry the running environment differs on."""
     from importlib.metadata import version, PackageNotFoundError
