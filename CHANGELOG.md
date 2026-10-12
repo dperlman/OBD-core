@@ -16,6 +16,12 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
+## Unreleased
+
+- `Store`: `p_range` may be a list of windows (computed in one `tie_table` call); a third product,
+  `Store.positions` (i, j, p\* from `screen`, uncertified), for tie-point searches at large n.
+- Numerically identical.
+
 ## v0.7.0 (2026-10-11)
 
 - `obd_core.store`: the shared store of tie tables and cusp tables (README). Optional extra

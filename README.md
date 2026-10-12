@@ -169,6 +169,7 @@ s = store.Store()
 t = s.ties(4000)                            # tie_table(4000): read it, or compute and save it
 w = s.ties(20000, p_range=(0.6, 0.6002))     # a window: only what is not yet stored is computed
 c = s.cusps(4321)                           # the rows with is_cusp; the full table is not kept
+x = s.positions(90000, p_range=[(0.6, 0.6001), (0.62, 0.6201)])   # i, j, p* only: no verdicts, much cheaper
 s.check("ties", ns=[1000, 4000])            # recompute and compare bit for bit; logged in STORE.json
 ```
 
@@ -178,6 +179,12 @@ s.check("ties", ns=[1000, 4000])            # recompute and compare bit for bit;
 - **Coverage.** Each n records which p intervals are complete and in which part files. A request
   computes only the uncovered gaps, with `tie_table(n, p_range=gaps)`, and saves them. Parts searched
   with `min_pair_mass` count as complete only for requests that accept that threshold.
+- **Windows.** `p_range` is `None` (all of [½, 1]), `(lo, hi)`, or a list of windows, which are
+  computed together in one `tie_table` call.
+- **Three products.** `ties` (full `tie_table` rows), `cusps` (the rows with `is_cusp`) and
+  `positions` (i, j, p\* of every tie point, no axis row): positions come from the screening kernel
+  without certifying anything, so a window at large n costs a fraction of a tie table. Their p\* are
+  `tie_table`'s. Cusps and positions are taken from stored tie tables wherever those cover.
 - **`ties` saves the full table; `cusps` saves only the cusps** unless `save_ties=True` (a full
   table is n²/4 rows, about 1 GB at n = 8000). `cusps` reads stored tie tables when they cover the
   range.

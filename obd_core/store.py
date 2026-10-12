@@ -43,7 +43,7 @@ import numpy as np
 import obd_core
 
 FORMAT = "obd.store.v1"
-KINDS = ("ties", "cusps")
+KINDS = ("ties", "cusps", "positions")
 
 
 class StaleData(RuntimeError):
@@ -179,13 +179,13 @@ class Store:
                              "seconds": seconds, "written_at": _now()})
         self._write_json(os.path.join(d, "coverage.json"), cov)
 
-    def _read(self, kind, n, lo, hi, min_pair_mass, columns):
+    def _read(self, kind, n, wins, min_pair_mass, columns):
         import pyarrow.parquet as pq
 
         d = self._dir(kind, n)
         pieces = []
         for p in sorted(self._usable(kind, n, min_pair_mass), key=lambda p: p["intervals"][0][0]):
-            if not any(a <= hi and b >= lo for a, b in p["intervals"]):
+            if not any(a <= hi and b >= lo for a, b in p["intervals"] for lo, hi in wins):
                 continue
             t = pq.read_table(os.path.join(d, p["file"]), columns=None if columns is None else
                               sorted(set(columns) | {"i", "j", "pstar"}))
@@ -193,7 +193,9 @@ class Store:
         if not pieces:
             return None
         out = {k: np.concatenate([q[k] for q in pieces]) for k in pieces[0]}
-        keep = (out["pstar"] >= lo) & (out["pstar"] <= hi)
+        keep = np.zeros(out["pstar"].size, bool)
+        for lo, hi in wins:
+            keep |= (out["pstar"] >= lo) & (out["pstar"] <= hi)
         out = {k: v[keep] for k, v in out.items()}
         # drop pairs stored twice (a tie point on the shared edge of two parts), then order by p* as
         # tie_table does; the sort is stable, so rows with equal p* keep tie_table's own order
@@ -210,21 +212,34 @@ class Store:
 
     # ------------------------------------------------------------ the requests
 
-    def _fill(self, kind, n, lo, hi, min_pair_mass, workers, pool, save_ties):
-        gaps = _gaps(lo, hi, self.covered(kind, n, min_pair_mass))
+    def _gaps_of(self, kind, n, wins, min_pair_mass):
+        have = self.covered(kind, n, min_pair_mass)
+        return _merge([g for lo, hi in wins for g in _gaps(lo, hi, have)])
+
+    def _fill(self, kind, n, wins, min_pair_mass, workers, pool, save_ties):
+        gaps = self._gaps_of(kind, n, wins, min_pair_mass)
         if not gaps:
             return
-        if kind == "cusps":                                    # fill from stored ties where they cover
+        if kind in ("cusps", "positions"):                     # derive from stored ties where they cover
             have = self.covered("ties", n, min_pair_mass)
             for g in list(gaps):
                 if not _gaps(g[0], g[1], have):
-                    t = self._read("ties", n, g[0], g[1], min_pair_mass, None)
-                    self._save("cusps", n, {k: v[t["is_cusp"]] for k, v in t.items()}, [g], min_pair_mass)
+                    t = self._read("ties", n, [g], min_pair_mass, None)
+                    self._save(kind, n, self._derive(kind, t), [g], min_pair_mass)
                     gaps.remove(g)
             if not gaps:
                 return
-        whole = gaps == [[0.5, 1.0]]
         t0 = time.time()
+        if kind == "positions":
+            lnC = obd_core.lnC_arr(n)
+            parts = [obd_core.screen(n, collect_all=True, lnC=lnC, p_range=tuple(g),
+                                     min_pair_mass=min_pair_mass or None) for g in gaps]
+            pos = {k: np.concatenate([q[k] for q in parts]) for k in ("i", "j", "pstar")}
+            o = np.argsort(pos["pstar"], kind="stable")
+            self._save("positions", n, {k: v[o] for k, v in pos.items()}, gaps, min_pair_mass,
+                       round(time.time() - t0, 3))
+            return
+        whole = gaps == [[0.5, 1.0]]
         t = obd_core.tie_table(n, workers=workers, pool=pool,
                                p_range=None if whole else [tuple(g) for g in gaps],
                                min_pair_mass=None if whole or not min_pair_mass else min_pair_mass)
@@ -233,24 +248,31 @@ class Store:
             self._save("ties", n, t, gaps, min_pair_mass, secs)
         have = self.covered("cusps", n, min_pair_mass)
         if kind == "cusps" or any(_gaps(a, b, have) for a, b in gaps):
-            self._save("cusps", n, {k: v[t["is_cusp"]] for k, v in t.items()}, gaps, min_pair_mass, secs)
+            self._save("cusps", n, self._derive("cusps", t), gaps, min_pair_mass, secs)
+
+    @staticmethod
+    def _derive(kind, t):
+        if kind == "cusps":
+            return {k: v[t["is_cusp"]] for k, v in t.items()}
+        axis = (t["pstar"] == 0.5) & (t["i"] == 0)               # positions come from screen: no axis row
+        return {k: np.asarray(t[k])[~axis] for k in ("i", "j", "pstar")}
 
     def ties(self, n: int, p_range=None, columns=None, min_pair_mass: float = 0.0, workers: int = 1, pool=None,
              save: bool = True) -> dict:
         """tie_table(n, p_range=...) rows, read from the store; what is missing is computed and saved.
 
-        p_range: None (all of [1/2, 1]) or (lo, hi) with 1/2 <= lo <= hi <= 1.  columns: a subset to
-        read.  min_pair_mass as in tie_table (not proved to keep every cusp); parts searched with a
-        threshold are used only by requests with at least that threshold.  save=False computes
-        without writing (and still reads what is stored)."""
-        lo, hi = self._range(p_range)
+        p_range: None (all of [1/2, 1]), (lo, hi), or a list of such windows (their union), with
+        1/2 <= lo <= hi <= 1.  columns: a subset to read.  min_pair_mass as in tie_table (not proved
+        to keep every cusp); parts searched with a threshold are used only by requests with at least
+        that threshold.  save=False computes without writing (and still reads what is stored)."""
+        wins = self._range(p_range)
         if save:
-            self._fill("ties", n, lo, hi, min_pair_mass, workers, pool, True)
-            return self._read("ties", n, lo, hi, min_pair_mass, columns)
-        if not _gaps(lo, hi, self.covered("ties", n, min_pair_mass)):
-            return self._read("ties", n, lo, hi, min_pair_mass, columns)
-        t = obd_core.tie_table(n, workers=workers, pool=pool, p_range=None if (lo, hi) == (0.5, 1.0) else (lo, hi),
-                               min_pair_mass=min_pair_mass or None)
+            self._fill("ties", n, wins, min_pair_mass, workers, pool, True)
+            return self._read("ties", n, wins, min_pair_mass, columns)
+        if not self._gaps_of("ties", n, wins, min_pair_mass):
+            return self._read("ties", n, wins, min_pair_mass, columns)
+        t = obd_core.tie_table(n, workers=workers, pool=pool, p_range=None if wins == [[0.5, 1.0]] else
+                               [tuple(w) for w in wins], min_pair_mass=min_pair_mass or None)
         return t if columns is None else {k: t[k] for k in columns}
 
     def cusps(self, n: int, p_range=None, columns=None, min_pair_mass: float = 0.0, workers: int = 1, pool=None,
@@ -259,16 +281,32 @@ class Store:
 
         Stored tie tables are used when they cover the range.  Otherwise tie_table is computed and
         only its cusps are kept, unless save_ties (a full table is ~n^2/4 rows: about 1 GB at n = 8000)."""
-        lo, hi = self._range(p_range)
-        self._fill("cusps", n, lo, hi, min_pair_mass, workers, pool, save_ties)
-        return self._read("cusps", n, lo, hi, min_pair_mass, columns)
+        wins = self._range(p_range)
+        self._fill("cusps", n, wins, min_pair_mass, workers, pool, save_ties)
+        return self._read("cusps", n, wins, min_pair_mass, columns)
+
+    def positions(self, n: int, p_range=None, min_pair_mass: float = 0.0) -> dict:
+        """{i, j, pstar} of every tie point of n with p* in p_range (the axis excluded), sorted by p*.
+
+        Positions only, no verdicts: computed by the screening kernel (screen(collect_all=True)),
+        which skips certification, so wide windows at large n cost a fraction of a tie table.  Taken
+        from stored tie tables where they cover the range.  The p* values are those of tie_table."""
+        wins = self._range(p_range)
+        self._fill("positions", n, wins, min_pair_mass, 1, None, False)
+        return self._read("positions", n, wins, min_pair_mass, None)
 
     @staticmethod
     def _range(p_range):
-        lo, hi = (0.5, 1.0) if p_range is None else (float(p_range[0]), float(p_range[1]))
-        if not 0.5 <= lo <= hi <= 1.0:
-            raise ValueError("the store holds p* >= 1/2: p_range must satisfy 1/2 <= lo <= hi <= 1")
-        return lo, hi
+        if p_range is None:
+            wins = [(0.5, 1.0)]
+        elif len(p_range) == 2 and np.ndim(p_range[0]) == 0:
+            wins = [p_range]
+        else:
+            wins = list(p_range)
+        wins = [(float(lo), float(hi)) for lo, hi in wins]
+        if not wins or not all(0.5 <= lo <= hi <= 1.0 for lo, hi in wins):
+            raise ValueError("the store holds p* >= 1/2: every window must satisfy 1/2 <= lo <= hi <= 1")
+        return _merge(wins)
 
     # ------------------------------------------------------------ checking
 
@@ -289,11 +327,19 @@ class Store:
             ok_n = True
             for p in cov["parts"]:
                 saved = self._read_part(kind, n, p)
-                t = obd_core.tie_table(n, workers=workers, pool=pool,
-                                       p_range=[tuple(iv) for iv in p["intervals"]] if p["intervals"] != [[0.5, 1.0]] else None,
-                                       min_pair_mass=p.get("min_pair_mass") or None)
-                if kind == "cusps":
-                    t = {k: v[t["is_cusp"]] for k, v in t.items()}
+                mpm = p.get("min_pair_mass") or None
+                if kind == "positions":                        # recompute the way positions are made
+                    lnC = obd_core.lnC_arr(n)
+                    parts = [obd_core.screen(n, collect_all=True, lnC=lnC, p_range=tuple(iv), min_pair_mass=mpm)
+                             for iv in p["intervals"]]
+                    t = {k: np.concatenate([q[k] for q in parts]) for k in ("i", "j", "pstar")}
+                    o, so = np.lexsort((t["j"], t["i"])), np.lexsort((saved["j"], saved["i"]))
+                    t, saved = {k: v[o] for k, v in t.items()}, {k: v[so] for k, v in saved.items()}
+                else:
+                    t = obd_core.tie_table(n, workers=workers, pool=pool, min_pair_mass=mpm,
+                                           p_range=[tuple(iv) for iv in p["intervals"]] if p["intervals"] != [[0.5, 1.0]] else None)
+                    if kind == "cusps":
+                        t = {k: v[t["is_cusp"]] for k, v in t.items()}
                 same = set(saved) == set(t) and all(
                     (list(saved[k]) == list(t[k])) if t[k].dtype == object else
                     (saved[k].dtype == t[k].dtype and np.array_equal(saved[k], t[k], equal_nan=True)) for k in t)
@@ -306,7 +352,7 @@ class Store:
             if restamped:
                 self._write_json(os.path.join(self._dir(kind, n), "coverage.json"), cov)
             if ok_n and reference_sample and kind == "ties" and n >= 3:
-                full = self._read(kind, n, 0.5, 1.0, 0.0, None)
+                full = self._read(kind, n, [[0.5, 1.0]], 0.0, None)
                 r = reference.check_tie_table(n, full, sample=reference_sample, seed=n)
                 if not (r["verdicts_ok"] and r["within_expected"]):
                     failures.append({"n": n, "reference": {k: r[k] for k in ("verdicts_ok", "within_expected")}})
