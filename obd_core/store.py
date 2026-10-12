@@ -166,15 +166,19 @@ class Store:
         tab = pa.table(cols).replace_schema_metadata({"format": FORMAT, "kind": kind, "n": str(n),
                                                       "numeric_epoch": str(obd_core.NUMERIC_EPOCH),
                                                       "obd_core_version": _core_version()})
-        floats = [c for c in tab.column_names if pa.types.is_floating(tab.schema.field(c).type)]
-        path = os.path.join(d, name)
-        pq.write_table(tab, path + ".tmp", compression="zstd",
-                       use_dictionary=[c for c in tab.column_names if c not in floats],
-                       column_encoding={c: "BYTE_STREAM_SPLIT" for c in floats})
-        os.replace(path + ".tmp", path)
+        extra = {}
+        if tab.num_rows == 0:                                  # an empty search: coverage only, no file
+            name, extra = None, {"dtypes": {k: str(np.asarray(v).dtype) for k, v in table.items()}}
+        else:
+            floats = [c for c in tab.column_names if pa.types.is_floating(tab.schema.field(c).type)]
+            path = os.path.join(d, name)
+            pq.write_table(tab, path + ".tmp", compression="zstd",
+                           use_dictionary=[c for c in tab.column_names if c not in floats],
+                           column_encoding={c: "BYTE_STREAM_SPLIT" for c in floats})
+            os.replace(path + ".tmp", path)
         cov = self.coverage(kind, n)
         cov.setdefault("format", FORMAT)
-        cov["parts"].append({"file": name, "intervals": [list(map(float, iv)) for iv in intervals],
+        cov["parts"].append({"file": name, **extra, "intervals": [list(map(float, iv)) for iv in intervals],
                              "min_pair_mass": float(min_pair_mass or 0.0), "rows": tab.num_rows,
                              "numeric_epoch": obd_core.NUMERIC_EPOCH, "obd_core_version": _core_version(),
                              "seconds": seconds, "written_at": _now()})
@@ -187,6 +191,10 @@ class Store:
         pieces = []
         for p in sorted(self._usable(kind, n, min_pair_mass), key=lambda p: p["intervals"][0][0]):
             if not any(a <= hi and b >= lo for a, b in p["intervals"] for lo, hi in wins):
+                continue
+            if p["file"] is None:                              # an empty search
+                want = None if columns is None else set(columns) | {"i", "j", "pstar"}
+                pieces.append({k: np.empty(0, np.dtype(dt)) for k, dt in p["dtypes"].items() if want is None or k in want})
                 continue
             t = pq.read_table(os.path.join(d, p["file"]), columns=None if columns is None else
                               sorted(set(columns) | {"i", "j", "pstar"}))
@@ -377,6 +385,8 @@ class Store:
     def _read_part(self, kind, n, part):
         import pyarrow.parquet as pq
 
+        if part["file"] is None:
+            return {k: np.empty(0, np.dtype(dt)) for k, dt in part["dtypes"].items()}
         t = pq.read_table(os.path.join(self._dir(kind, n), part["file"]))
         out = {k: t[k].to_numpy(zero_copy_only=False) for k in t.column_names}
         return {k: (v.astype(object) if v.dtype.kind in "OUS" else v) for k, v in out.items()}

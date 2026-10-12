@@ -197,3 +197,20 @@ def test_many_processes_open_a_new_store_at_once(tmp_path):
     with ProcessPoolExecutor(4) as ex:
         assert all(ex.map(_open_store, [root] * 16))
     assert json.load(open(os.path.join(root, "STORE.json")))["format"] == st.FORMAT
+
+
+def test_an_empty_search_is_recorded_without_a_file(s, monkeypatch):
+    n = 200
+    full = core.tie_table(n)
+    gap = (0.70001, 0.70002)                                 # no tie point of n = 200 in here
+    assert not np.any((full["pstar"] >= gap[0]) & (full["pstar"] <= gap[1]))
+    t = s.ties(n, p_range=gap)
+    assert all(len(v) == 0 for v in t.values())
+    _same(t, _restrict(full, *gap))                          # same columns and dtypes, no rows
+    assert s.coverage("ties", n)["parts"][0]["file"] is None
+    assert [f for f in os.listdir(s._dir("ties", n)) if f.endswith(".parquet")] == []
+    monkeypatch.setattr(core, "tie_table", lambda *a, **k: (_ for _ in ()).throw(AssertionError("recomputed")))
+    _same(s.ties(n, p_range=gap), _restrict(full, *gap))
+    monkeypatch.undo()
+    assert s.check("ties", ns=[n], reference_sample=0)["failures"] == []
+    assert s.positions(n, p_range=gap)["pstar"].size == 0
