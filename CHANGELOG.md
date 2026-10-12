@@ -16,11 +16,16 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
-## Unreleased
+## v0.8.0 (2026-10-11)
 
 - `Store`: `p_range` may be a list of windows (computed in one `tie_table` call); a third product,
-  `Store.positions` (i, j, p\* from `screen`, uncertified), for tie-point searches at large n.
-- Numerically identical.
+  `Store.positions` (i, j, p\* from `screen`, uncertified), for tie-point searches at large n;
+  `Store.ties(both_halves=True)`; an empty search is recorded as coverage without a file; JSON
+  writes use unique temporary names (several processes may open a new store at once).
+- `tie_table(both_halves=True)` builds the mirror half with `_with_mirror_half`, which the store
+  also uses (the same code, moved into a function).
+- Numerically identical (rule 3: cusps_fast tables for n = 3..600, 1000, 1162, 2001, 3000 and
+  dump_ties Parquet for the ten listed n, byte for byte).
 
 ## v0.7.0 (2026-10-11)
 
