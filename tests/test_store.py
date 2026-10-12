@@ -183,3 +183,17 @@ def test_positions_from_stored_ties_equal_screened_ones(s, tmp_path, monkeypatch
     assert s.ns("positions") == []                          # read from the ties, not duplicated
     o = st.Store(tmp_path / "other")
     assert o.check("positions", ns=[n])["failures"] == []
+
+
+def _open_store(root):
+    st.Store(root)
+    return True
+
+
+def test_many_processes_open_a_new_store_at_once(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+
+    root = str(tmp_path / "fresh")
+    with ProcessPoolExecutor(4) as ex:
+        assert all(ex.map(_open_store, [root] * 16))
+    assert json.load(open(os.path.join(root, "STORE.json")))["format"] == st.FORMAT

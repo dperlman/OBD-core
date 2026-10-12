@@ -114,9 +114,10 @@ class Store:
 
     @staticmethod
     def _write_json(path: str, obj) -> None:
-        with open(path + ".tmp", "w") as f:
+        tmp = f"{path}.{os.getpid()}.{time.time_ns()}.tmp"     # unique: several processes may write at once
+        with open(tmp, "w") as f:
             json.dump(obj, f, indent=1)
-        os.replace(path + ".tmp", path)
+        os.replace(tmp, path)
 
     def coverage(self, kind: str, n: int) -> dict:
         """{"parts": [{"file", "intervals", "min_pair_mass", "numeric_epoch", ...}], ...}, empty if none."""
