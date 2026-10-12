@@ -28,18 +28,17 @@ updated in the same piece of work.
    return a plain float as if it were certified.
 3. **Kernel changes must be shown harmless, byte for byte.** After any change to `obd_core/__init__.py`
    that the certified pipeline uses (`_masses`, `_pstar`, `_one_tie`, `_err_bounds`, `tie_kernel`, `screen`,
-   `certify*`, `axis_point`, `tie_table`), in the cusps repo:
+   `certify*`, `axis_point`, `tie_table`, `_with_mirror_half`), run
    ```bash
-   cd ~/git/ordered-binomial-cusps
-   S=$(mktemp -d)
-   .venv/bin/python cusps_fast.py --nmin 3 --nmax 600 --workers 8 --out $S
-   for n in 1000 1162 2001 3000; do .venv/bin/python cusps_fast.py --nmin $n --nmax $n --workers 8 --out $S; done
-   for n in $(seq 3 600) 1000 1162 2001 3000; do f=n$(printf %05d $n).csv; cmp -s $S/$f cusps/$f || echo DIFF $f; done
+   /Users/omgoleus/opt/miniconda3/envs/obd/bin/python tools/regression_check.py
    ```
-   No output means identical. Do the same for `dump_ties.py` (n = 3, 7, 100, 135, 217, 274, 1000,
-   1055, 1162, 2001; build references with the old code first, then compare the Parquet bytes).
-   n = 1162 and 1055 exercise interval certification. If a change is *meant* to alter output,
-   say so in the commit and record it in the cusps repo's `RESEARCH_LOG.md`.
+   with the changed code installed (or on `PYTHONPATH`). It recomputes a fixed set of n (tie tables,
+   cusp tables including n = 1055 and 1162, which exercise interval certification, and tie
+   positions out to n = 99,999) and compares them bit for bit with what earlier releases stored in
+   `~/obd-data`; it must print `rule 3: PASS`. If a change is *meant* to alter output, bump
+   `NUMERIC_EPOCH` (rule 8), say so in the commit and the CHANGELOG, and record it in the cusps repo's
+   `RESEARCH_LOG.md`. (Until 2026-10-12 this rule ran the cusps repo's `cusps_fast.py` and
+   `dump_ties.py` against that repo's local files; v0.8.0 was the last release checked that way.)
 4. **Check new numerics against the reference.** `reference.check_tie_table(n, core.tie_table(n, both_halves=True))`
    must return `verdicts_ok` and `within_expected` (the tests do this for n ≤ 300). If you change
    the error behaviour, re-measure and update `reference.expected_double_error`, whose docstring
