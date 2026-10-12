@@ -180,4 +180,6 @@ def test_positions_from_stored_ties_equal_screened_ones(s, tmp_path, monkeypatch
     assert sorted(zip(derived["i"].tolist(), derived["j"].tolist(), derived["pstar"].tolist())) == \
         sorted(zip(other["i"].tolist(), other["j"].tolist(), other["pstar"].tolist()))
     assert 0 not in derived["i"]                            # no axis row, as screen gives none
-    assert s.check("positions", ns=[n])["failures"] == []
+    assert s.ns("positions") == []                          # read from the ties, not duplicated
+    o = st.Store(tmp_path / "other")
+    assert o.check("positions", ns=[n])["failures"] == []

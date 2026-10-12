@@ -289,9 +289,12 @@ class Store:
         """{i, j, pstar} of every tie point of n with p* in p_range (the axis excluded), sorted by p*.
 
         Positions only, no verdicts: computed by the screening kernel (screen(collect_all=True)),
-        which skips certification, so wide windows at large n cost a fraction of a tie table.  Taken
-        from stored tie tables where they cover the range.  The p* values are those of tie_table."""
+        which skips certification, so wide windows at large n cost a fraction of a tie table.  When
+        stored tie tables cover the whole request they are read instead, and nothing is saved (it
+        would only duplicate them).  The p* values are those of tie_table."""
         wins = self._range(p_range)
+        if not self._gaps_of("ties", n, wins, min_pair_mass):
+            return self._derive("positions", self._read("ties", n, wins, min_pair_mass, ["i", "j", "pstar"]))
         self._fill("positions", n, wins, min_pair_mass, 1, None, False)
         return self._read("positions", n, wins, min_pair_mass, None)
 
