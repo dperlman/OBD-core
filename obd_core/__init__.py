@@ -727,6 +727,21 @@ def _as_windows(p_range):
         return [(float(p_range[0]), float(p_range[1]))]
     return [(float(a), float(b)) for a, b in p_range]
 
+def _with_mirror_half(n, r):
+    """A p* >= 1/2 tie table (row 0 the axis) with the p* < 1/2 half prepended, by E(p) = E(1-p).
+
+    The mirror of (i, j) at p* is (n-j, n-i) at 1-p*, with the same E, ln_fi, D and verdict, and
+    E'_-(1-p*) = -E'_+(p*), E'_+(1-p*) = -E'_-(p*).  F3 is NaN there.  The only place the mirror
+    half is built (tie_table(both_halves=True) and obd_core.store both call it)."""
+    m = {k: v[:0:-1] for k, v in r.items()}           # rows 1..c-1, reversed: p* descending
+    m['i'], m['j'] = n - r['j'][:0:-1], n - r['i'][:0:-1]
+    m['pstar'] = 1 - r['pstar'][:0:-1]
+    m['slope_left'], m['slope_right'] = -r['slope_right'][:0:-1], -r['slope_left'][:0:-1]
+    m['S_minus'] = m['slope_left']*(m['pstar']*(1 - m['pstar']))
+    m['F3'] = np.full(len(r['pstar']) - 1, np.nan)
+    return {k: np.concatenate([m[k], r[k]]) for k in r}
+
+
 def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair_mass=None):
     """Every tie point of n, sorted by p*, with certified cusp verdicts and exact slopes.
 
@@ -818,13 +833,7 @@ def tie_table(n, both_halves=False, workers=1, pool=None, p_range=None, min_pair
     r['slope_right'] = r['slope_left'] + np.exp(ln_D)
     r['slope_right'][0] = aSp/pq[0]                    # exact at the axis: E'_+ = -E'_-
     if both_halves:
-        m = {k: v[:0:-1] for k, v in r.items()}       # rows 1..c-1, reversed: p* descending
-        m['i'], m['j'] = n - r['j'][:0:-1], n - r['i'][:0:-1]
-        m['pstar'] = 1 - r['pstar'][:0:-1]
-        m['slope_left'], m['slope_right'] = -r['slope_right'][:0:-1], -r['slope_left'][:0:-1]
-        m['S_minus'] = m['slope_left']*(m['pstar']*(1 - m['pstar']))
-        m['F3'] = np.full(c - 1, np.nan)
-        r = {k: np.concatenate([m[k], r[k]]) for k in r}
+        r = _with_mirror_half(n, r)
     if p_range is not None:
         keep = np.zeros(len(r['pstar']), bool)
         for lo, hi in wins:

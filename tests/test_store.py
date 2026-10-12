@@ -214,3 +214,10 @@ def test_an_empty_search_is_recorded_without_a_file(s, monkeypatch):
     monkeypatch.undo()
     assert s.check("ties", ns=[n], reference_sample=0)["failures"] == []
     assert s.positions(n, p_range=gap)["pstar"].size == 0
+
+
+@pytest.mark.parametrize("n", [2, 3, 50, 300])
+def test_both_halves_equal_tie_table(s, n):
+    _same(s.ties(n, both_halves=True), core.tie_table(n, both_halves=True))
+    _same(s.ties(n, both_halves=True, columns=["pstar", "E"]),
+          {k: core.tie_table(n, both_halves=True)[k] for k in ("pstar", "E")})

@@ -267,13 +267,20 @@ class Store:
         return {k: np.asarray(t[k])[~axis] for k in ("i", "j", "pstar")}
 
     def ties(self, n: int, p_range=None, columns=None, min_pair_mass: float = 0.0, workers: int = 1, pool=None,
-             save: bool = True) -> dict:
+             save: bool = True, both_halves: bool = False) -> dict:
         """tie_table(n, p_range=...) rows, read from the store; what is missing is computed and saved.
 
         p_range: None (all of [1/2, 1]), (lo, hi), or a list of such windows (their union), with
         1/2 <= lo <= hi <= 1.  columns: a subset to read.  min_pair_mass as in tie_table (not proved
         to keep every cusp); parts searched with a threshold are used only by requests with at least
-        that threshold.  save=False computes without writing (and still reads what is stored)."""
+        that threshold.  save=False computes without writing (and still reads what is stored).
+        both_halves=True (whole tables only) adds the p* < 1/2 half exactly as
+        tie_table(n, both_halves=True) does."""
+        if both_halves:
+            if p_range is not None:
+                raise ValueError("both_halves needs the whole table (p_range=None)")
+            t = obd_core._with_mirror_half(n, self.ties(n, None, None, min_pair_mass, workers, pool, save))
+            return t if columns is None else {k: t[k] for k in columns}
         wins = self._range(p_range)
         if save:
             self._fill("ties", n, wins, min_pair_mass, workers, pool, True)
