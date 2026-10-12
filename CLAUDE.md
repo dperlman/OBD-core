@@ -56,6 +56,12 @@ updated in the same piece of work.
    (Apple Silicon) with the pinned stack on every push to `main`, every tag and every pull
    request. Check it (`gh run list --repo dperlman/OBD-core --limit 3`) before tagging a release.
 
+8. **The numeric epoch follows rule 3.** If rule 3 shows that a change alters any output (a value,
+   a dtype, a verdict, a row), bump `NUMERIC_EPOCH` in the same commit and say so in the
+   CHANGELOG. Stored data (`obd_core.store`, `~/obd-data`) from the old epoch is then refused until
+   `Store.check` has compared it (agreeing parts are re-stamped) or it is recomputed. A change that
+   keeps every output bit for bit keeps the epoch, and the store stays valid.
+
 ## Releasing
 
 1. Bump `version` in `pyproject.toml` and the version in the README install line, and add the

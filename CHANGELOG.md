@@ -16,6 +16,16 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
+## v0.7.0 (2026-10-11)
+
+- `obd_core.store`: the shared store of tie tables and cusp tables (README). Optional extra
+  `obd-core[store]` (pyarrow). Adds no computation: every value comes from `tie_table`.
+- `NUMERIC_EPOCH = 1`: changes only when an output changes; the store refuses data from another
+  epoch. Epoch 1 begins with v0.6.1.
+- `tools/build_store.py` fills a store from this package and compares every older copy of each table
+  (OBD's tie tables, the cusps repo's tie tables and cusp CSVs) on the way.
+- Numerically identical.
+
 ## v0.6.1 (2026-10-08)
 
 - **Fix:** `tie_table` stored `n_tied_pairs` as int16, and the axis row holds n/2 pairs, so every
