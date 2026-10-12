@@ -16,7 +16,7 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
-## Unreleased
+## v0.7.0 (2026-10-11)
 
 - `obd_core.store`: the shared store of tie tables and cusp tables (README). Optional extra
   `obd-core[store]` (pyarrow). Adds no computation: every value comes from `tie_table`.
