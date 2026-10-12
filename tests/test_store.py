@@ -138,3 +138,86 @@ def test_gaps():
     assert st._gaps(0.6, 0.65, [[0.5, 0.7]]) == []
     assert st._gaps(0.55, 0.65, [[0.5, 0.6], [0.6, 0.62]]) == [[0.62, 0.65]]
     assert st._gaps(0.6, 0.6, []) == [[0.6, 0.6]]
+
+
+def test_several_windows_in_one_request(s, monkeypatch):
+    n = 300
+    full = core.tie_table(n)
+    wins = [(0.62, 0.64), (0.55, 0.56), (0.555, 0.57)]
+    keep = np.zeros(len(full["pstar"]), bool)
+    for lo, hi in wins:
+        keep |= (full["pstar"] >= lo) & (full["pstar"] <= hi)
+    calls = []
+    real = core.tie_table
+    monkeypatch.setattr(core, "tie_table", lambda n_, **k: (calls.append(k.get("p_range")), real(n_, **k))[1])
+    _same(s.ties(n, p_range=wins), {k: v[keep] for k, v in full.items()})
+    assert len(calls) == 1                                  # one tie_table call for all the windows
+    _same(s.cusps(n, p_range=wins), {k: v[keep & full["is_cusp"]] for k, v in full.items()})
+
+
+def _screen_positions(n, lo, hi):
+    t = core.screen(n, collect_all=True, p_range=(lo, hi))
+    o = np.argsort(t["pstar"], kind="stable")
+    return {k: t[k][o] for k in ("i", "j", "pstar")}
+
+
+@pytest.mark.parametrize("n", [40, 300])
+def test_positions_are_screens_tie_points(s, n):
+    got = s.positions(n, p_range=(0.55, 0.6))
+    want = _screen_positions(n, 0.55, 0.6)
+    assert sorted(zip(got["i"].tolist(), got["j"].tolist())) == sorted(zip(want["i"].tolist(), want["j"].tolist()))
+    assert np.array_equal(np.sort(got["pstar"]), np.sort(want["pstar"]))
+    assert np.all(np.diff(got["pstar"]) >= 0)
+
+
+def test_positions_from_stored_ties_equal_screened_ones(s, tmp_path, monkeypatch):
+    n = 300
+    s.ties(n)
+    monkeypatch.setattr(core, "screen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("screened")))
+    derived = s.positions(n, p_range=(0.5, 1.0))
+    monkeypatch.undo()
+    other = st.Store(tmp_path / "other").positions(n, p_range=(0.5, 1.0))
+    assert sorted(zip(derived["i"].tolist(), derived["j"].tolist(), derived["pstar"].tolist())) == \
+        sorted(zip(other["i"].tolist(), other["j"].tolist(), other["pstar"].tolist()))
+    assert 0 not in derived["i"]                            # no axis row, as screen gives none
+    assert s.ns("positions") == []                          # read from the ties, not duplicated
+    o = st.Store(tmp_path / "other")
+    assert o.check("positions", ns=[n])["failures"] == []
+
+
+def _open_store(root):
+    st.Store(root)
+    return True
+
+
+def test_many_processes_open_a_new_store_at_once(tmp_path):
+    from concurrent.futures import ProcessPoolExecutor
+
+    root = str(tmp_path / "fresh")
+    with ProcessPoolExecutor(4) as ex:
+        assert all(ex.map(_open_store, [root] * 16))
+    assert json.load(open(os.path.join(root, "STORE.json")))["format"] == st.FORMAT
+
+
+def test_an_empty_search_is_recorded_without_a_file(s, monkeypatch):
+    n = 200
+    full = core.tie_table(n)
+    gap = (0.70001, 0.70002)                                 # no tie point of n = 200 in here
+    assert not np.any((full["pstar"] >= gap[0]) & (full["pstar"] <= gap[1]))
+    t = s.ties(n, p_range=gap)
+    assert all(len(v) == 0 for v in t.values())
+    _same(t, _restrict(full, *gap))                          # same columns and dtypes, no rows
+    assert s.coverage("ties", n)["parts"][0]["file"] is None
+    assert [f for f in os.listdir(s._dir("ties", n)) if f.endswith(".parquet")] == []
+    monkeypatch.setattr(core, "tie_table", lambda *a, **k: (_ for _ in ()).throw(AssertionError("recomputed")))
+    _same(s.ties(n, p_range=gap), _restrict(full, *gap))
+    monkeypatch.undo()
+    assert s.check("ties", ns=[n], reference_sample=0)["failures"] == []
+    assert s.positions(n, p_range=gap)["pstar"].size == 0
+
+
+@pytest.mark.parametrize("n", [2, 3, 50, 300])
+def test_both_halves_equal_tie_table(s, n):
+    _same(s.ties(n, both_halves=True), core.tie_table(n, both_halves=True))
+    _same(s.ties(n, both_halves=True, columns=["pstar", "E"]),
+          {k: core.tie_table(n, both_halves=True)[k] for k in ("pstar", "E")})
