@@ -13,7 +13,7 @@ no more. No CI-style automation, no scheduled jobs, nothing that republishes its
 |---|---|---|
 | **OBD-core** (`~/git/OBD-core`) | the mathematics (tie points, cusp verdicts, E and its slopes), the independent rigorous `reference`, and the store: its code, format and tools | code that computes a tie point, a verdict, a slope or E lives here and only here; tagged releases, the others pin one (v0.8.0) |
 | **OBD** (`~/git/OBD`) | plots, animations, explorers, the gallery in `docs/plots` | reads data only through the store; keeps only pictures and render-side caches |
-| **ordered-binomial-cusps** (`~/git/ordered-binomial-cusps`) | FACTS, RESEARCH_LOG, proofs, analysis scripts, the committed findings in `public/` | uses data, does not produce it |
+| **ordered-binomial-cusps** (`~/git/ordered-binomial-cusps`) | FACTS, RESEARCH_LOG, proofs, analysis scripts, the committed findings in `public/` | uses data, does not produce it (since 2026-10-12) |
 
 OBD and the research repo depend on OBD-core and never on each other.
 
@@ -47,6 +47,12 @@ x = s.positions(90000, p_range=(0.999, 1.0))      # i, j, p* only
 s.check("ties", ns=[1000, 4000])                  # recompute, compare bit for bit, log in STORE.json
 ```
 
+To see what the store holds, on one screen (12 s):
+
+```bash
+python ~/git/OBD-core/tools/store_summary.py
+```
+
 In OBD the plots do this themselves; in the research repo `cusps_data.py` gives the cusp catalogue
 (`read_cusps`: the columns `cusps_all.csv` had) and per-n tables (`load_ties`, `load_cusps`).
 
@@ -71,13 +77,13 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
 
 1. Done: the store (v0.7.0, v0.8.0); the data moved in and checked; OBD reads only the store and its
    old copies are retired; rule 3 runs against the store.
-2. Done on branch `read-the-store`: the research scripts read the store. Before/after over all 19:
-   16 identical (plots pixel for pixel); the rest differ only in that 26 cusps are labelled
-   "double" rather than "iv50", and the collision check covers 1,046 n instead of 17.
-3. Next: merge that branch; move the research repo's `cusps/`, `data/`, `cusps_fast.py`,
-   `dump_ties.py`, `validate_trigger.py` to the Trash.
-4. Then: a store summary command.
-5. Then: back to the mathematics and the pictures.
+2. Done: the research scripts read the store. Before/after over all 19: 16 identical (plots pixel
+   for pixel); the rest differ only in that 26 cusps are labelled "double" rather than "iv50", and
+   the collision check covers 1,046 n instead of 17 (its RESEARCH_LOG, 2026-10-12). Its `cusps/`,
+   `data/`, `cusps_fast.py`, `dump_ties.py` and `validate_trigger.py` are retired: the store is
+   the only copy.
+3. Done: `tools/store_summary.py`.
+4. Next: back to the mathematics and the pictures.
 
 ## Not planned unless needed
 
