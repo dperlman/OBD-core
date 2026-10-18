@@ -2,7 +2,7 @@
 
 How the three repositories divide the work, where every computed number lives, how to check it,
 and what is deliberately left undone. Kept up to date by hand; the same content is published as the
-page "OBD Data Store Design" (https://claude.ai/artifact/FgtACNaNpxvsap5rSqFyS7). As of 2026-10-12.
+page "OBD Data Store Design" (https://claude.ai/artifact/FgtACNaNpxvsap5rSqFyS7). As of 2026-10-17.
 
 A passion project's infrastructure: as much as keeps the data trustworthy and the plots quick, and
 no more. No CI-style automation, no scheduled jobs, nothing that republishes itself.
@@ -19,13 +19,13 @@ OBD and the research repo depend on OBD-core and never on each other.
 
 ## Where the data lives
 
-Everything computed is in `~/obd-data` (or `$OBD_DATA`), outside every repository, 14 GB:
+Everything computed is in `~/obd-data` (or `$OBD_DATA`), outside every repository, 78 GB:
 
 | product | what | holds |
 |---|---|---|
-| `ties` | full tie tables: every tie point of n with p* ≥ ½, all `tie_table` columns | 1,046 n: every n ≤ 1000; 2000, 3000, …, 8000; the 40 animation n (13 GB) |
+| `ties` | full tie tables: every tie point of n with p* ≥ ½, all `tie_table` columns | 1,277 n: every n ≤ 1000, and 277 larger n up to 10,000 (2000, 3000, …, 8000 and the n the animations use) (78 GB) |
 | `cusps` | the certified cusps of n, same columns | every n from 2 to 5000, plus the larger n above (0.3 GB) |
-| `positions` | i, j, p* only (no verdicts), in narrow p-windows | 99,000 n up to 100,000 (0.5 GB) |
+| `positions` | i, j, p* only (no verdicts), in narrow p-windows | 99,000 n up to 100,000 (0.1 GB) |
 
 All of it comes from `tie_table` (positions from `screen`) through `obd_core.store`. A full tie table
 is about n²/4 rows (about 1 GB at n = 8000), so tie tables are kept for chosen n; cusp tables cover
@@ -93,7 +93,7 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
 | graph data into the store | feeds only OBD's older explorers; rebuilds in a minute; builds its masses in OBD (a second copy of that mathematics, for drawing only) | those explorers matter again, or another repo needs E on a grid |
 | auditing research scripts for their own mathematics | e.g. `analyze_cusps.py` computes p* with its own formula for neighbour gaps; not checked against OBD-core bit for bit; reading the store instead would need tie tables for every n ≤ 5000 (~500 GB) | a result rests on such a script and must be beyond doubt |
 | sorting the research repo's plotting folders, archiving OBD's legacy scripts, renaming the research repo | tidiness only | it gets in the way of finding things |
-| a slimmer tie-table format, or evicting old tables | 14 GB used, 1.1 TB free | dense sweeps of large n become routine |
+| a slimmer tie-table format, or evicting old tables | 78 GB used, about 1 TB free | dense sweeps of large n become routine |
 | publishing the data | already documented and versioned | there is a paper or a reader |
 
 ## Format details
@@ -126,5 +126,8 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
   from `cusps_fast.py`). Plots computed tie tables afresh each time.
 - 2026-10-11..12: the store built, filled, checked against all of them; OBD switched and its old
   copies retired; rule 3 moved onto the store; the research scripts switched on a branch.
+- 2026-10-17: tie tables up to n = 10,000 for the 30 fps animations (231 new n, about 60 GB, computed
+  and saved automatically). `Store.check` on three of them flagged n = 10,000 against the reference;
+  the data was right and the reference's E tolerance too tight for large n, recalibrated in v0.8.1.
 - Correction: `cusps_fast.py` was once described as an independent implementation. It drives
   OBD-core's own kernel; the independent check is `obd_core.reference`.
