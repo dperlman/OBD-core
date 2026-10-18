@@ -487,25 +487,33 @@ def expected_double_error(n: int) -> dict[str, float]:
 
     Relative errors in the sense of ``Value.rel_err`` (floor 1, so small values are measured
     absolutely).  EMPIRICAL bounds, not proofs: the worst errors over ~200 sampled rows of
-    tie_table(n, both_halves=True) at n = 10, 100, 500, 1000, 2000 (2026-10-07), times a margin of
-    ~4-6.  Measured worst cases:
+    tie_table(n, both_halves=True) at n = 10, 100, 500, 1000, 2000 (2026-10-07), and ~100 rows at
+    n = 4000 ... 10000 (2026-10-17), times a margin of ~4-6.  Measured worst cases:
 
         n      p*        E         slopes    log10_D
         100    4.1e-15   5.5e-16   8.6e-12   3.2e-14
         1000   1.4e-14   6.7e-16   5.3e-10   2.3e-13
         2000   3.7e-13   6.5e-16   1.7e-08   4.8e-13
+        4000   4.6e-14   1.4e-15   8.9e-09   1.6e-12
+        10000  3.1e-14   4.3e-16   6.4e-08   1.8e-12
+
+    The axis row (p* = 1/2, where E sums all n + 1 terms) is E's worst row, and sampling rarely
+    picks it: measured at every stored n from 1000 to 10000 (279 n, 2026-10-17), its error has a
+    median growing like sqrt(n) (2.5 eps at n ~ 1000, 8 eps at n ~ 9000) and a worst case of
+    0.28 sqrt(n) eps (4.4e-15 at n = 8444), hence E's sqrt(n) term.  (Until v0.8.1 E's bound was a
+    constant 4e-15, which the axis row exceeds from n ~ 6000.)
 
     The slopes are the weak spot: S_- is a sum of terms ~ n f(k)(k - np) that cancel to a small
     number, so its error grows faster than n^2 eps.  p* comes from a difference of log-binomials of
-    size ~n, so its error grows like n log(n) eps.  E is essentially full precision.  An error
+    size ~n, so its error grows like n log(n) eps.  E is close to full precision.  An error
     above these bounds means something is wrong, not just rounding.
     """
-    from math import log
+    from math import log, sqrt
 
     n = max(int(n), 1)
     return {
         "p": 1e-16 * n * log(n + 1) + 1e-15,
-        "E": 4e-15,
+        "E": 4e-15 + 2e-16 * sqrt(n),
         "slopes": 4 * (2.5e-15 * n * n + 2e-18 * n ** 3) + 1e-13,
         "log10_D": 1e-15 * n + 1e-14,
     }

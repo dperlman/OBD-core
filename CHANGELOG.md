@@ -16,6 +16,15 @@ against ordered-binomial-cusps' tables and dumps).
 
 The tags are kept because published tags are not rewritten. Nothing pins any of them.
 
+## v0.8.1 (2026-10-17)
+
+- `reference.expected_double_error`: E's bound grows with n, 4e-15 + 2e-16·√n (was a constant
+  4e-15). The axis row (p\* = ½, E summing all n + 1 terms) has a rounding error growing like √n
+  and exceeded the old bound from n ≈ 6000 (worst 4.4e-15 at n = 8444, measured at all 279 stored
+  n from 1000 to 10,000); `Store.check` flagged n = 10,000 for it. Re-measured at n = 4000 … 10,000;
+  no other bound needed changing. The docstring holds the measurements.
+- Numerically identical: no computation changed, only the tolerance the reference check uses.
+
 ## v0.8.0 (2026-10-11)
 
 - `Store`: `p_range` may be a list of windows (computed in one `tie_table` call); a third product,
