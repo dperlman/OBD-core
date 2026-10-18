@@ -11,7 +11,7 @@ no more. No CI-style automation, no scheduled jobs, nothing that republishes its
 
 | repo | role | rule |
 |---|---|---|
-| **OBD-core** (`~/git/OBD-core`) | the mathematics (tie points, cusp verdicts, E and its slopes), the independent rigorous `reference`, and the store: its code, format and tools | code that computes a tie point, a verdict, a slope or E lives here and only here; tagged releases, the others pin one (v0.8.0) |
+| **OBD-core** (`~/git/OBD-core`) | the mathematics (tie points, cusp verdicts, E and its slopes), the independent rigorous `reference`, and the store: its code, format and tools | code that computes a tie point, a verdict, a slope or E lives here and only here; tagged releases, the others pin one (v0.8.1) |
 | **OBD** (`~/git/OBD`) | plots, animations, explorers, the gallery in `docs/plots` | reads data only through the store; keeps only pictures and render-side caches |
 | **ordered-binomial-cusps** (`~/git/ordered-binomial-cusps`) | FACTS, RESEARCH_LOG, proofs, analysis scripts, the committed findings in `public/` | uses data, does not produce it (since 2026-10-12) |
 
