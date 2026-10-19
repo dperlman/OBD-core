@@ -1,11 +1,26 @@
 # OBD data store design
 
 How the three repositories divide the work, where every computed number lives, how to check it,
-and what is deliberately left undone. Kept up to date by hand; the same content is published as the
-page "OBD Data Store Design" (https://claude.ai/artifact/FgtACNaNpxvsap5rSqFyS7). As of 2026-10-17.
+and what is deliberately left undone. As of 2026-10-18.
+
+**This file is the design document.** Change the design here and nowhere else. The page "OBD Data
+Store Design" (https://claude.ai/artifact/FgtACNaNpxvsap5rSqFyS7) is a copy made from this file
+for easier reading: never edit the page itself; regenerate it from this file after a change. If the
+two disagree, this file is right.
 
 A passion project's infrastructure: as much as keeps the data trustworthy and the plots quick, and
-no more. No CI-style automation, no scheduled jobs, nothing that republishes itself.
+no more.
+
+## Goals
+
+- **Trust the data.** Every stored table is right for the OBD-core in use, and you are told plainly
+  when one is not.
+- **One place, one answer.** All computed tie and cusp data in one store, made by one piece of code,
+  and one command to see what it holds.
+- **Never compute twice.** Anything computed once is saved and read back, so redoing a plot is
+  faster than doing it.
+- **No machinery.** No CI-style automation, no scheduled jobs, nothing that republishes itself.
+  Things happen when you ask.
 
 ## Three repositories
 
@@ -15,16 +30,22 @@ no more. No CI-style automation, no scheduled jobs, nothing that republishes its
 | **OBD** (`~/git/OBD`) | plots, animations, explorers, the gallery in `docs/plots` | reads data only through the store; keeps only pictures and render-side caches |
 | **ordered-binomial-cusps** (`~/git/ordered-binomial-cusps`) | FACTS, RESEARCH_LOG, proofs, analysis scripts, the committed findings in `public/` | uses data, does not produce it (since 2026-10-12) |
 
-OBD and the research repo depend on OBD-core and never on each other.
+OBD and the research repo depend on OBD-core and never on each other. When the research log refers
+to a plot, it names the image in OBD's `docs/plots`, whose embedded settings record how it was made.
+
+Locally, both consumers run OBD-core from its checkout (`pip install -e ~/git/OBD-core`), not from
+the pinned tag; the pin is what a fresh install gets. So keep the checkout at the pinned release
+(or doc-only commits past it) unless deliberately trying a change.
 
 ## Where the data lives
 
-Everything computed is in `~/obd-data` (or `$OBD_DATA`), outside every repository, 78 GB:
+Everything computed is in `~/obd-data` (or `$OBD_DATA`), outside every repository, 114 GB
+(2026-10-18; `tools/store_summary.py` gives the current figures):
 
 | product | what | holds |
 |---|---|---|
-| `ties` | full tie tables: every tie point of n with p* ≥ ½, all `tie_table` columns | 1,277 n: every n ≤ 1000, and 277 larger n up to 10,000 (2000, 3000, …, 8000 and the n the animations use) (78 GB) |
-| `cusps` | the certified cusps of n, same columns | every n from 2 to 5000, plus the larger n above (0.3 GB) |
+| `ties` | full tie tables: every tie point of n with p* ≥ ½, all `tie_table` columns | 1,564 n: every n from 2 to 1000, and 564 larger n up to 10,000 (2000, 3000, …, 8000 and the n the animations use) (114 GB) |
+| `cusps` | the certified cusps of n, same columns | every n from 2 to 5000, plus 81 larger n up to 10,000 (0.3 GB) |
 | `positions` | i, j, p* only (no verdicts), in narrow p-windows | 99,000 n up to 100,000 (0.1 GB) |
 
 All of it comes from `tie_table` (positions from `screen`) through `obd_core.store`. A full tie table
@@ -70,8 +91,8 @@ In OBD the plots do this themselves; in the research repo `cusps_data.py` gives 
 ## Caches
 
 The store makes plots quick (tie tables are read, not computed). Drawing is still done each time.
-Caches that exist, all in OBD and disposable: animation frames (`plots/pair-map-frames/`, keyed by
-the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parquet`.
+Caches that exist, all in OBD and disposable: animation frames (`plots/pair-map-frames/`, 1.4 GB,
+keyed by the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parquet`.
 
 ## Status
 
@@ -83,7 +104,10 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
    `data/`, `cusps_fast.py`, `dump_ties.py` and `validate_trigger.py` are retired: the store is
    the only copy.
 3. Done: `tools/store_summary.py`.
-4. Next: back to the mathematics and the pictures.
+4. Done (2026-10-18): this file made the only copy of the design (the page is regenerated from it),
+   with the related documents listed below; the research repo's descriptions of its retired data
+   marked as superseded, pointing here.
+5. Next: back to the mathematics and the pictures.
 
 ## Not planned unless needed
 
@@ -93,8 +117,22 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
 | graph data into the store | feeds only OBD's older explorers; rebuilds in a minute; builds its masses in OBD (a second copy of that mathematics, for drawing only) | those explorers matter again, or another repo needs E on a grid |
 | auditing research scripts for their own mathematics | e.g. `analyze_cusps.py` computes p* with its own formula for neighbour gaps; not checked against OBD-core bit for bit; reading the store instead would need tie tables for every n ≤ 5000 (~500 GB) | a result rests on such a script and must be beyond doubt |
 | sorting the research repo's plotting folders, archiving OBD's legacy scripts, renaming the research repo | tidiness only | it gets in the way of finding things |
-| a slimmer tie-table format, or evicting old tables | 78 GB used, about 1 TB free | dense sweeps of large n become routine |
+| a slimmer tie-table format, or evicting old tables | 114 GB used, about 1 TB free | dense sweeps of large n become routine |
 | publishing the data | already documented and versioned | there is a paper or a reader |
+
+## Related documents
+
+Each holds one part of the design; this file is the overview, and they are not copied here.
+
+| document | holds | where |
+|---|---|---|
+| OBD-core `CLAUDE.md` | the rules for changing the core: tests, `tools/regression_check.py` (rule 3), `NUMERIC_EPOCH`, tagging a release | this repo |
+| OBD-core `README.md` | how to use the API, the store and `reference`, and the pitfalls | this repo |
+| `~/obd-data/README.md` | the store's on-disk format, for anyone who finds the folder | the store; written by hand on 2026-10-11, not in any repository |
+| ordered-binomial-cusps `CLAUDE.md`, "Data publication policy" | what the public research repo commits (`public/`: per-n results that may grow, samples that are pinned), size limits enforced by `make_public_data.py`, no git-lfs | the research repo |
+| ordered-binomial-cusps `RESEARCH_LOG.md` section 7 | the numerical rules for tie-table columns: masses normalised by their sum; the kink taken from `ln_fi`, so `slope_right = slope_left + D`, never `S_plus / (p q)` | the research repo |
+| OBD `OBD_data_map.md` | OBD's files and formats: the graph data, `tie_cusps.parquet`, the tie-table columns as OBD's loaders serve them from the store; the retired pathways kept for the record | OBD |
+| OBD `README.md` | the plot commands and the gallery | OBD |
 
 ## Format details
 
@@ -129,5 +167,9 @@ the drawing settings and a `STYLE` version), the graph data and `tie_cusps.parqu
 - 2026-10-17: tie tables up to n = 10,000 for the 30 fps animations (231 new n, about 60 GB, computed
   and saved automatically). `Store.check` on three of them flagged n = 10,000 against the reference;
   the data was right and the reference's E tolerance too tight for large n, recalibrated in v0.8.1.
+- 2026-10-17..18: 287 more n of tie tables for the log, square-root and colour-scale animations
+  (about 36 GB), saved automatically.
+- 2026-10-18: this file made the single source; until then it and the page were two hand-kept copies,
+  and the page had drifted (a Goals section the file lacked, an old frame-cache size).
 - Correction: `cusps_fast.py` was once described as an independent implementation. It drives
   OBD-core's own kernel; the independent check is `obd_core.reference`.
