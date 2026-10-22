@@ -5,8 +5,9 @@ and what is deliberately left undone. As of 2026-10-18.
 
 **This file is the design document.** Change the design here and nowhere else. The page "OBD Data
 Store Design" (https://claude.ai/artifact/FgtACNaNpxvsap5rSqFyS7) is a copy made from this file
-for easier reading: never edit the page itself; regenerate it from this file after a change. If the
-two disagree, this file is right.
+for easier reading: never edit the page itself. After a change, commit this file, then run
+`tools/design_page.py OUT.html` and publish OUT.html to the page. If the two disagree, this file is
+right.
 
 A passion project's infrastructure: as much as keeps the data trustworthy and the plots quick, and
 no more.
